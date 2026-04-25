@@ -14,6 +14,7 @@ type Config struct {
 	RabbitMQ RabbitMQConfig `yaml:"rabbitmq"`
 	JWT      JWTConfig      `yaml:"jwt"`
 	Upload   UploadConfig   `yaml:"upload"`
+	Pprof    PprofConfig    `yaml:"pprof"`
 }
 
 type ServerConfig struct {
@@ -54,6 +55,16 @@ type JWTConfig struct {
 
 type UploadConfig struct {
 	Dir string `yaml:"dir"`
+}
+
+type PprofConfig struct {
+	API    PprofServerConfig `yaml:"api"`
+	Worker PprofServerConfig `yaml:"worker"`
+}
+
+type PprofServerConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Addr    string `yaml:"addr"`
 }
 
 func Load(path string) (*Config, error) {

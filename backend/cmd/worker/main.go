@@ -16,6 +16,7 @@ import (
 	"my_feed_system/internal/db"
 	"my_feed_system/internal/feed"
 	"my_feed_system/internal/mq"
+	"my_feed_system/internal/observability"
 	"my_feed_system/internal/popularity"
 	"my_feed_system/internal/video"
 	workerpkg "my_feed_system/internal/worker"
@@ -72,17 +73,19 @@ func main() {
 		log.Fatalf("declare rabbitmq topology failed: %v", err)
 	}
 
-	// Worker 也需要 publisher，用于在消费主业务事件后继续发布热度事件。
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := observability.StartPprof(ctx, "worker", cfg.Pprof.Worker); err != nil {
+		log.Fatalf("start worker pprof failed: %v", err)
+	}
+
 	publisher := mq.NewPublisher(rabbitConn)
 	likeWorker := workerpkg.NewLikeWorker(database, publisher, detailCache)
 	commentWorker := workerpkg.NewCommentWorker(database, publisher, detailCache)
 	socialWorker := workerpkg.NewSocialWorker(database)
 	popularityWorker := workerpkg.NewPopularityWorker(database, popularityService, detailCache)
 	timelineConsumer := workerpkg.NewTimelineConsumer(timelineStore, latestCache)
-
-	// 监听退出信号，触发优雅关闭。
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	consumerTagPrefix := strings.TrimSpace(cfg.RabbitMQ.ConsumerTag)
 	if consumerTagPrefix == "" {
@@ -96,7 +99,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// 每个消费者使用独立 tag，便于在 RabbitMQ 控制台定位。
+
 			tag := fmt.Sprintf("%s-%s", consumerTagPrefix, suffix)
 			consumer := mq.NewConsumer(rabbitConn, queue, tag, cfg.RabbitMQ.PrefetchCount, handler)
 			log.Printf("consumer started: queue=%s tag=%s", queue, tag)
@@ -106,7 +109,6 @@ func main() {
 		}()
 	}
 
-	// 按单职责启动消费者，后续可按队列维度独立调优吞吐。
 	start(mq.QueueLikeWrite, "like", likeWorker.Handle)
 	start(mq.QueueCommentWrite, "comment", commentWorker.Handle)
 	start(mq.QueueSocialWrite, "social", socialWorker.Handle)

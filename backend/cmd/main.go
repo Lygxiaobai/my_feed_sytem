@@ -2,8 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/redis/go-redis/v9"
 
@@ -11,9 +17,12 @@ import (
 	"my_feed_system/internal/db"
 	httpserver "my_feed_system/internal/http"
 	"my_feed_system/internal/mq"
+	"my_feed_system/internal/observability"
 	"my_feed_system/internal/outbox"
 	"my_feed_system/internal/popularity"
 )
+
+const serverShutdownTimeout = 5 * time.Second
 
 func main() {
 	cfg, err := config.Load("configs/config.yaml")
@@ -60,15 +69,43 @@ func main() {
 		}
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := observability.StartPprof(ctx, "api", cfg.Pprof.API); err != nil {
+		log.Fatalf("start api pprof failed: %v", err)
+	}
+
 	publisher := mq.NewResilientPublisher(cfg.RabbitMQ)
-	// API 进程内启动 Outbox Poller；即使启动时 MQ 不可用，后续恢复后也能继续补投。
-	go outbox.NewPoller(outbox.NewRepo(database), publisher).Run(context.Background())
+	go outbox.NewPoller(outbox.NewRepo(database), publisher).Run(ctx)
 
 	router := httpserver.NewRouter(database, redisCmd, popularityService, publisher, cfg.JWT.Secret, cfg.Upload.Dir)
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
+	server := &http.Server{
+		Addr:    addr,
+		Handler: router,
+	}
 
-	log.Printf("server started at %s", addr)
-	if err := router.Run(addr); err != nil {
-		log.Fatalf("run server failed: %v", err)
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("server started at %s", addr)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errCh <- fmt.Errorf("run server failed: %w", err)
+		}
+	}()
+
+	select {
+	case <-ctx.Done():
+		log.Printf("server shutting down")
+	case err := <-errCh:
+		log.Printf("%v", err)
+		stop()
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("shutdown server failed: %v", err)
 	}
 }

@@ -9,6 +9,7 @@ Thumbs.db
 
 # Development docs not intended for submission
 /*.md
+!README.md
 
 # Go test files and coverage artifacts
 *_test.go
@@ -17,6 +18,7 @@ coverage.out
 
 # Runtime logs and temporary outputs
 logs/
+.run/
 *.log
 *.out
 *.err

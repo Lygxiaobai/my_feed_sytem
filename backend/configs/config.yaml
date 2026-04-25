@@ -28,3 +28,11 @@ jwt:
 
 upload:
   dir: .run/uploads
+
+pprof:
+  api:
+    enabled: true
+    addr: 127.0.0.1:6060
+  worker:
+    enabled: true
+    addr: 127.0.0.1:6061
