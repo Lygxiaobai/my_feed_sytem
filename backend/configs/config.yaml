@@ -1,0 +1,30 @@
+server:
+  port: 8081
+
+database:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: 123456
+  dbname: my_feed_system
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+
+rabbitmq:
+  host: 127.0.0.1
+  port: 5672
+  username: guest
+  password: guest
+  vhost: /
+  prefetch_count: 16
+  consumer_tag: feed-worker
+
+jwt:
+  secret: my-feed-system-secret
+
+upload:
+  dir: .run/uploads

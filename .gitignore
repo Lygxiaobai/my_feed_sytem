@@ -1,0 +1,39 @@
+# IDE / local workspace
+.idea/
+.magi/
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Development docs not intended for submission
+/*.md
+
+# Go test files and coverage artifacts
+*_test.go
+*.cover
+coverage.out
+
+# Runtime logs and temporary outputs
+logs/
+*.log
+*.out
+*.err
+*.pid
+
+# Backend local runtime files
+backend/.run/
+
+# Nginx local runtime state
+nginx/runtime/
+
+# Frontend dependencies and build outputs
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+
+# Local env overrides
+*.local
+.env.local
+.env.*.local
