@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, reactive, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppShell from '../components/AppShell.vue'
@@ -33,6 +33,7 @@ const state = reactive({
   socialLoading: false,
   socialError: '',
 })
+const followBusy = ref(false)
 
 const isFollowing = computed(() => (auth.isLoggedIn ? social.isFollowing(userId.value) : false))
 const totalReceivedLikes = computed(() => state.videos.reduce((sum, item) => sum + (item.likes_count ?? 0), 0))
@@ -62,11 +63,19 @@ async function loadProfile() {
 
 async function loadSocialCounts() {
   state.socialError = ''
-  state.followers = []
-  state.vloggers = []
 
-  if (!auth.isLoggedIn) return
-  if (!Number.isFinite(userId.value) || userId.value <= 0) return
+  if (!auth.isLoggedIn) {
+    state.socialLoading = false
+    state.followers = []
+    state.vloggers = []
+    return
+  }
+  if (!Number.isFinite(userId.value) || userId.value <= 0) {
+    state.socialLoading = false
+    state.followers = []
+    state.vloggers = []
+    return
+  }
 
   state.socialLoading = true
   try {
@@ -83,6 +92,57 @@ async function loadSocialCounts() {
   }
 }
 
+function applyFollowerOptimisticChange(shouldFollow: boolean) {
+  const followerId = myId.value
+  const user = state.user
+  if (!followerId || !user) return
+
+  if (shouldFollow) {
+    if (state.followers.some((item) => item.follower_id === followerId)) return
+    state.followers = state.followers.concat({
+      id: 0,
+      follower_id: followerId,
+      vlogger_id: user.id,
+      created_at: new Date().toISOString(),
+      follower_username: auth.claims?.username,
+      vlogger_username: user.username,
+    })
+    return
+  }
+
+  state.followers = state.followers.filter((item) => item.follower_id !== followerId)
+}
+
+async function syncSocialCountsUntil(shouldFollow: boolean) {
+  const currentUserId = userId.value
+  const currentFollowerId = myId.value
+  if (!auth.isLoggedIn || !currentFollowerId || !Number.isFinite(currentUserId) || currentUserId <= 0) return
+
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 400)
+      })
+    }
+    if (userId.value !== currentUserId) return
+
+    try {
+      const [followersRes, vloggersRes] = await Promise.all([
+        socialApi.getAllFollowers(currentUserId),
+        socialApi.getAllVloggers(currentUserId),
+      ])
+      if (followersRes.followers.some((item) => item.follower_id === currentFollowerId) === shouldFollow) {
+        state.socialError = ''
+        state.followers = followersRes.followers
+        state.vloggers = vloggersRes.vloggers
+        return
+      }
+    } catch {
+      // Keep optimistic state and retry quietly.
+    }
+  }
+}
+
 async function toggleFollow() {
   if (isMe.value) return
   if (!auth.isLoggedIn) {
@@ -90,19 +150,26 @@ async function toggleFollow() {
     await router.push('/account')
     return
   }
+  if (followBusy.value || social.isPending(userId.value)) return
 
+  const nextShouldFollow = !isFollowing.value
+  followBusy.value = true
   try {
-    if (isFollowing.value) {
+    applyFollowerOptimisticChange(nextShouldFollow)
+    if (!nextShouldFollow) {
       await social.unfollow(userId.value)
       toast.info('已取关')
     } else {
-      await social.follow(userId.value)
+      await social.follow(userId.value, state.user?.username)
       toast.success('已关注')
     }
-    await loadSocialCounts()
+    void syncSocialCountsUntil(nextShouldFollow)
   } catch (e) {
+    applyFollowerOptimisticChange(!nextShouldFollow)
     const msg = e instanceof ApiError ? e.message : String(e)
     toast.error(msg)
+  } finally {
+    followBusy.value = false
   }
 }
 
@@ -180,7 +247,13 @@ onMounted(loadProfile)
 
         <div class="row">
           <button v-if="isMe" class="ghost" type="button" @click="router.push('/account')">我的账号</button>
-          <button v-else class="primary" type="button" :disabled="!state.user || state.loading" @click="toggleFollow">
+          <button
+            v-else
+            class="primary"
+            type="button"
+            :disabled="!state.user || state.loading || followBusy || social.isPending(userId)"
+            @click="toggleFollow"
+          >
             {{ isFollowing ? '已关注' : '关注' }}
           </button>
         </div>

@@ -127,7 +127,9 @@ watch(
 
       <div v-if="state.items.length" class="rank-list" style="margin-top: 14px">
         <div v-for="(item, idx) in state.items" :key="`hot-${item.id}`" class="rank-row">
-          <div class="rank-num" :class="idx < 3 ? 'top' : ''">{{ idx + 1 }}</div>
+          <RouterLink class="rank-num" :class="idx < 3 ? 'top' : ''" :to="`/video/${item.id}`" :title="`查看第 ${idx + 1} 名视频详情`">
+            {{ idx + 1 }}
+          </RouterLink>
           <FeedVideoCard
             :item="item"
             :can-like="canLike"
@@ -165,6 +167,14 @@ watch(
   background: rgba(255, 255, 255, 0.06);
   color: rgba(255, 255, 255, 0.86);
   user-select: none;
+  text-decoration: none;
+  transition: transform 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.rank-num:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .rank-num.top {

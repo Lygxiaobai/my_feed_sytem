@@ -75,6 +75,7 @@ export type FeedVideoItem = {
   likes_count: number
   comment_count: number
   is_liked: boolean
+  popularity?: number
 }
 
 export type BackendAccountEnvelope = {

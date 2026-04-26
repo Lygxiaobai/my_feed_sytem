@@ -27,6 +27,7 @@ function normalizeFeedVideo(item: BackendFeedVideo): FeedVideoItem {
     likes_count: item.likes_count,
     comment_count: item.comment_count ?? 0,
     is_liked: false,
+    popularity: item.popularity,
   }
 }
 

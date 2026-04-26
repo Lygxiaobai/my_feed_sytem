@@ -14,13 +14,18 @@ const emit = defineEmits<{
 function onToggle() {
   emit('toggle-like', props.item)
 }
+
+function formatPopularity(value?: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return ''
+  return value.toLocaleString('zh-CN', { maximumFractionDigits: 2 })
+}
 </script>
 
 <template>
   <div class="feed-card">
-    <div class="cover">
+    <RouterLink class="cover" :to="`/video/${item.id}`" :title="`查看《${item.title}》详情`">
       <img :src="item.cover_url" :alt="item.title" loading="lazy" />
-    </div>
+    </RouterLink>
     <div class="content">
       <div class="row" style="justify-content: space-between">
         <div>
@@ -33,6 +38,7 @@ function onToggle() {
           </div>
         </div>
         <div class="row">
+          <span v-if="typeof item.popularity === 'number'" class="pill mono hot-pill">热度 {{ formatPopularity(item.popularity) }}</span>
           <span class="pill mono">&#x2665; {{ item.likes_count }}</span>
           <span class="pill mono">&#x1F4AC; {{ item.comment_count }}</span>
           <button
@@ -70,6 +76,8 @@ function onToggle() {
 .cover {
   background: rgba(0, 0, 0, 0.25);
   aspect-ratio: 16/9;
+  display: block;
+  overflow: hidden;
 }
 
 .cover img {
@@ -77,10 +85,21 @@ function onToggle() {
   height: 100%;
   object-fit: cover;
   display: block;
+  transition: transform 160ms ease;
+}
+
+.cover:hover img {
+  transform: scale(1.03);
 }
 
 .content {
   padding: 12px 12px 14px;
+}
+
+.hot-pill {
+  border-color: rgba(254, 44, 85, 0.35);
+  background: rgba(254, 44, 85, 0.1);
+  color: rgba(255, 244, 246, 0.95);
 }
 
 @media (max-width: 900px) {

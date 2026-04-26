@@ -12,6 +12,7 @@ import type { Comment, CommentReply, FeedVideoItem } from '../api/types'
 import { useAuthStore } from '../stores/auth'
 import { useSocialStore } from '../stores/social'
 import { useToastStore } from '../stores/toast'
+import { countComments, hasCommentID, insertPublishedComment, removeCommentByID } from '../utils/comments'
 
 type TabKey = 'recommend' | 'hot' | 'following'
 
@@ -304,14 +305,15 @@ async function toggleLike(item: FeedVideoItem) {
 async function toggleFollow(authorId: number) {
   if (!auth.isLoggedIn) return needLogin()
   const key = String(authorId)
-  if (followBusy[key]) return
+  if (followBusy[key] || social.isPending(authorId)) return
   followBusy[key] = true
   try {
     if (social.isFollowing(authorId)) {
       await social.unfollow(authorId)
       toast.info('已取关')
     } else {
-      await social.follow(authorId)
+      const author = currentState.value.items.find((item) => item.author.id === authorId)?.author
+      await social.follow(authorId, author?.username)
       toast.success('已关注')
     }
   } catch (e) {
@@ -342,12 +344,24 @@ const drawer = reactive({
   replyTarget: null as Comment | CommentReply | null,
 })
 
-const totalCommentCount = computed(() =>
-  drawer.comments.reduce((sum, comment) => sum + 1 + comment.replies.length, 0),
-)
+const commentSyncAttempts = 6
+const commentSyncDelayMs = 400
 
 function clearReplyTarget() {
   drawer.replyTarget = null
+}
+
+function applyComments(comments: Comment[]) {
+  drawer.comments = comments
+  if (drawer.video) {
+    drawer.video.comment_count = countComments(comments)
+  }
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, ms)
+  })
 }
 
 function closeDrawer() {
@@ -372,8 +386,7 @@ async function loadComments() {
   drawer.loading = true
   drawer.error = ''
   try {
-    drawer.comments = await commentApi.listAll(drawer.video.id)
-    drawer.video.comment_count = totalCommentCount.value
+    applyComments(await commentApi.listAll(drawer.video.id))
   } catch (e) {
     drawer.error = e instanceof ApiError ? e.message : String(e)
   } finally {
@@ -385,6 +398,34 @@ function startReply(target: Comment | CommentReply) {
   drawer.replyTarget = target
 }
 
+async function syncCommentsUntil(commentId: number, shouldExist: boolean) {
+  const videoId = drawer.video?.id
+  if (!videoId) return
+
+  for (let attempt = 0; attempt < commentSyncAttempts; attempt += 1) {
+    if (attempt > 0) {
+      await wait(commentSyncDelayMs)
+    }
+    if (!drawer.open || drawer.video?.id !== videoId) {
+      return
+    }
+
+    try {
+      const comments = await commentApi.listAll(videoId)
+      if (hasCommentID(comments, commentId) === shouldExist) {
+        drawer.error = ''
+        applyComments(comments)
+        if (drawer.replyTarget && !hasCommentID(comments, drawer.replyTarget.id)) {
+          clearReplyTarget()
+        }
+        return
+      }
+    } catch {
+      // Ignore transient refresh failures and keep optimistic state.
+    }
+  }
+}
+
 async function publishComment() {
   if (!drawer.video) return
   if (!auth.isLoggedIn) return needLogin()
@@ -393,10 +434,11 @@ async function publishComment() {
   drawer.loading = true
   drawer.error = ''
   try {
-    await commentApi.publish(drawer.video.id, content, drawer.replyTarget?.id)
+    const res = await commentApi.publish(drawer.video.id, content, drawer.replyTarget?.id)
     drawer.content = ''
     clearReplyTarget()
-    await loadComments()
+    applyComments(insertPublishedComment(drawer.comments, res.comment))
+    void syncCommentsUntil(res.comment.id, true)
     toast.success('评论已发布')
   } catch (e) {
     drawer.error = e instanceof ApiError ? e.message : String(e)
@@ -419,8 +461,10 @@ async function deleteComment(commentId: number) {
   drawer.error = ''
   try {
     await commentApi.remove(commentId)
-    if (drawer.replyTarget?.id === commentId) clearReplyTarget()
-    await loadComments()
+    const nextComments = removeCommentByID(drawer.comments, commentId)
+    applyComments(nextComments)
+    if (drawer.replyTarget && !hasCommentID(nextComments, drawer.replyTarget.id)) clearReplyTarget()
+    void syncCommentsUntil(commentId, false)
     toast.info('评论已删除')
   } catch (e) {
     drawer.error = e instanceof ApiError ? e.message : String(e)
@@ -607,7 +651,7 @@ onBeforeUnmount(() => {
                 v-if="canInteractWithFollow && (!myAccountId || myAccountId !== item.author.id)"
                 class="act"
                 type="button"
-                :disabled="!!followBusy[String(item.author.id)]"
+                :disabled="!!followBusy[String(item.author.id)] || social.isPending(item.author.id)"
                 @click.stop="toggleFollow(item.author.id)"
               >
                 <span class="icon">＋</span>
@@ -640,7 +684,7 @@ onBeforeUnmount(() => {
           </div>
 
           <div class="drawer-body">
-            <div v-if="drawer.loading" class="drawer-hint">加载中…</div>
+            <div v-if="drawer.loading && drawer.comments.length === 0" class="drawer-hint">加载中…</div>
             <div v-else-if="drawer.error" class="drawer-hint bad">{{ drawer.error }}</div>
             <div v-else-if="drawer.comments.length === 0" class="drawer-hint">暂无评论</div>
 

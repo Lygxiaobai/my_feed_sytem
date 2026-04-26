@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"sync/atomic"
 	"time"
 
 	"gorm.io/gorm"
@@ -22,8 +21,6 @@ var (
 	ErrInvalidParentComment  = errors.New("parent comment not found")
 	ErrParentCommentMismatch = errors.New("parent comment does not belong to this video")
 )
-
-var commentIDSequence atomic.Uint64
 
 type Service struct {
 	db          *gorm.DB
@@ -105,6 +102,12 @@ func (s *Service) Publish(accountID uint64, username string, req PublishRequest)
 			return nil, err
 		}
 		if parentComment == nil {
+			parentComment, err = s.repo.FindByVideoIDAndResolvableID(req.VideoID, req.ParentCommentID)
+			if err != nil {
+				return nil, err
+			}
+		}
+		if parentComment == nil {
 			return nil, ErrInvalidParentComment
 		}
 		if parentComment.VideoID != req.VideoID {
@@ -121,17 +124,14 @@ func (s *Service) Publish(accountID uint64, username string, req PublishRequest)
 		}
 	}
 
-	// 兜底：未接入 MQ 时沿用同步写逻辑。
 	if s.publisher == nil {
 		return s.publishSync(comment)
 	}
 
-	// 先分配 comment_id，再发事件，保证客户端能立即拿到稳定 ID。
 	comment.ID = nextCommentID()
 	comment.CreatedAt = time.Now().UTC()
 	comment.UpdatedAt = comment.CreatedAt
 
-	// 异步路径：发布写事件后快速返回，由 Worker 落库。
 	event, err := mq.NewEnvelope(mq.EventTypeCommentCreated, mq.ProducerAPIServer, mq.CommentCreatedPayload{
 		CommentID:       comment.ID,
 		VideoID:         comment.VideoID,
@@ -162,6 +162,12 @@ func (s *Service) Delete(accountID uint64, req DeleteRequest) error {
 		return err
 	}
 	if comment == nil {
+		comment, err = s.repo.FindByResolvableID(req.CommentID)
+		if err != nil {
+			return err
+		}
+	}
+	if comment == nil {
 		return ErrCommentNotFound
 	}
 
@@ -176,14 +182,12 @@ func (s *Service) Delete(accountID uint64, req DeleteRequest) error {
 		return ErrCommentForbidden
 	}
 
-	// 兜底：未接入 MQ 时沿用同步写逻辑。
 	if s.publisher == nil {
-		return s.deleteSync(accountID, req, comment.VideoID)
+		return s.deleteSync(comment.ID, comment.VideoID)
 	}
 
-	// 异步路径：发布删除事件后快速返回，由 Worker 执行删除。
 	event, err := mq.NewEnvelope(mq.EventTypeCommentDeleted, mq.ProducerAPIServer, mq.CommentDeletedPayload{
-		CommentID:  req.CommentID,
+		CommentID:  comment.ID,
 		VideoID:    comment.VideoID,
 		OperatorID: accountID,
 	})
@@ -224,13 +228,13 @@ func (s *Service) publishSync(comment *VideoComment) (*VideoComment, error) {
 	return comment, nil
 }
 
-func (s *Service) deleteSync(_ uint64, req DeleteRequest, videoID uint64) error {
+func (s *Service) deleteSync(commentID uint64, videoID uint64) error {
 	deletedCount := int64(0)
 	popularityDelta := int64(0)
 
 	if err := s.db.Transaction(func(tx *gorm.DB) error {
 		var err error
-		deletedCount, err = s.repo.DeleteByIDOrRootID(tx, req.CommentID)
+		deletedCount, err = s.repo.DeleteByIDOrRootID(tx, commentID)
 		if err != nil {
 			return err
 		}
@@ -255,11 +259,6 @@ func (s *Service) deleteSync(_ uint64, req DeleteRequest, videoID uint64) error 
 	s.invalidateDetailCache(videoID)
 
 	return nil
-}
-
-func nextCommentID() uint64 {
-	// 时间戳 + 本地序列，降低高并发同毫秒下的碰撞概率。
-	return uint64(time.Now().UnixNano()) + commentIDSequence.Add(1)
 }
 
 func (s *Service) invalidateDetailCache(videoID uint64) {
