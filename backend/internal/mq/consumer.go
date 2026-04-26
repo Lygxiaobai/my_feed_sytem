@@ -84,6 +84,85 @@ func (c *Consumer) Run(ctx context.Context) error {
 }
 
 func (c *Consumer) handleDelivery(parent context.Context, d amqp.Delivery) error {
+	return handleDelivery(parent, d, c.handle)
+}
+
+func ConsumeEphemeralFanout(ctx context.Context, conn *amqp.Connection, exchange string, consumerTag string, prefetchCount int, handle HandlerFunc) error {
+	if conn == nil {
+		return fmt.Errorf("rabbitmq connection is nil")
+	}
+	if handle == nil {
+		return fmt.Errorf("consumer handler is nil")
+	}
+	if prefetchCount <= 0 {
+		prefetchCount = 10
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		return fmt.Errorf("open consumer channel: %w", err)
+	}
+	defer ch.Close()
+
+	if err := ch.Qos(prefetchCount, 0, false); err != nil {
+		return fmt.Errorf("set qos: %w", err)
+	}
+
+	queue, err := ch.QueueDeclare(
+		//临时队列
+		"",
+		false,
+		true,
+		true,
+		false,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("declare ephemeral queue: %w", err)
+	}
+
+	if err := ch.QueueBind(queue.Name, "", exchange, false, nil); err != nil {
+		return fmt.Errorf("bind ephemeral queue %s to exchange %s: %w", queue.Name, exchange, err)
+	}
+
+	msgs, err := ch.Consume(
+		queue.Name,
+		consumerTag,
+		false,
+		true,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		return fmt.Errorf("consume queue %s: %w", queue.Name, err)
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case d, ok := <-msgs:
+			if !ok {
+				return fmt.Errorf("consumer channel closed: %s", queue.Name)
+			}
+
+			if err := handleDelivery(ctx, d, handle); err != nil {
+				log.Printf("consumer[%s]: handle message failed, drop fanout message: %v", exchange, err)
+				if nackErr := d.Nack(false, false); nackErr != nil {
+					log.Printf("consumer[%s]: nack failed: %v", exchange, nackErr)
+				}
+				continue
+			}
+
+			if err := d.Ack(false); err != nil {
+				log.Printf("consumer[%s]: ack failed: %v", exchange, err)
+			}
+		}
+	}
+}
+
+func handleDelivery(parent context.Context, d amqp.Delivery, handle HandlerFunc) error {
 	var env Envelope
 	if err := json.Unmarshal(d.Body, &env); err != nil {
 		return fmt.Errorf("unmarshal envelope: %w", err)
@@ -92,5 +171,5 @@ func (c *Consumer) handleDelivery(parent context.Context, d amqp.Delivery) error
 	handleCtx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 
-	return c.handle(handleCtx, env)
+	return handle(handleCtx, env)
 }

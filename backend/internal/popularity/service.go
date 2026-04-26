@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -13,6 +14,7 @@ const (
 	defaultWindowMinutes = 60
 	defaultBucketTTL     = 2 * time.Hour
 	defaultSnapshotTTL   = 2 * time.Minute
+	defaultEventTTL      = 3 * time.Hour
 )
 
 const (
@@ -75,6 +77,34 @@ func (s *Service) Record(ctx context.Context, videoID uint64, delta float64, occ
 	pipe.ZIncrBy(ctx, key, delta, member)
 	pipe.Expire(ctx, key, s.bucketTTL)
 	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// RecordEvent writes a popularity delta into the minute bucket exactly once for the same event ID.
+func (s *Service) RecordEvent(ctx context.Context, eventID string, videoID uint64, delta float64, occurredAt time.Time) error {
+	if !s.Enabled() || delta == 0 {
+		return nil
+	}
+
+	eventID = strings.TrimSpace(eventID)
+	if eventID == "" {
+		return s.Record(ctx, videoID, delta, occurredAt)
+	}
+
+	_, err := s.client.Eval(ctx, `
+local claimed = redis.call("SET", KEYS[1], "1", "NX", "EX", ARGV[1])
+if not claimed then
+	return 0
+end
+redis.call("ZINCRBY", KEYS[2], ARGV[2], ARGV[3])
+redis.call("EXPIRE", KEYS[2], ARGV[4])
+return 1
+`, []string{s.eventKey(eventID), s.bucketKey(occurredAt)},
+		int64(s.eventTTL()/time.Second),
+		strconv.FormatFloat(delta, 'f', -1, 64),
+		strconv.FormatUint(videoID, 10),
+		int64(s.bucketTTL/time.Second),
+	).Result()
 	return err
 }
 
@@ -209,6 +239,17 @@ func (s *Service) bucketAnchor(asOf time.Time) time.Time {
 // bucketKey 生成分钟桶对应的 Redis key。
 func (s *Service) bucketKey(ts time.Time) string {
 	return fmt.Sprintf("hot:video:1m:%s", ts.UTC().Format("200601021504"))
+}
+
+func (s *Service) eventKey(eventID string) string {
+	return fmt.Sprintf("hot:video:event:%s", eventID)
+}
+
+func (s *Service) eventTTL() time.Duration {
+	if s.bucketTTL <= 0 {
+		return defaultEventTTL
+	}
+	return s.bucketTTL + time.Hour
 }
 
 // snapshotKey 生成热榜快照对应的 Redis key。

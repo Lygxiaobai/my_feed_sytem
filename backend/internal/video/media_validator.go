@@ -11,6 +11,14 @@ import (
 	"strings"
 )
 
+/*
+*
+媒体文件守门员
+
+上传时验文件
+发布视频时验 URL
+读视频/feed 时过滤脏数据
+*/
 var (
 	ErrInvalidPlayURL     = errors.New("play_url must reference an uploaded video")
 	ErrInvalidCoverURL    = errors.New("cover_url must reference an uploaded cover")

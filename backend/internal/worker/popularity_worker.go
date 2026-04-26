@@ -15,18 +15,20 @@ import (
 )
 
 type PopularityWorker struct {
-	db          *gorm.DB
-	videoRepo   *video.Repo
-	service     *popularity.Service
-	detailCache *video.DetailCache
+	db             *gorm.DB
+	videoRepo      *video.Repo
+	service        *popularity.Service
+	projectionRepo *popularity.ProjectionRepo
+	detailCache    *video.DetailCache
 }
 
 func NewPopularityWorker(db *gorm.DB, service *popularity.Service, detailCache *video.DetailCache) *PopularityWorker {
 	return &PopularityWorker{
-		db:          db,
-		videoRepo:   video.NewRepo(db),
-		service:     service,
-		detailCache: detailCache,
+		db:             db,
+		videoRepo:      video.NewRepo(db),
+		service:        service,
+		projectionRepo: popularity.NewProjectionRepo(db),
+		detailCache:    detailCache,
 	}
 }
 
@@ -49,7 +51,7 @@ func (w *PopularityWorker) Handle(ctx context.Context, event mq.Envelope) error 
 	}
 
 	alreadyProcessed := false
-	//mysql热度持久化 原子累加 update
+	var projection *popularity.Projection
 	if err := w.db.Transaction(func(tx *gorm.DB) error {
 		if err := mq.MarkProcessed(tx, "popularity-worker", event); err != nil {
 			if errors.Is(err, mq.ErrAlreadyProcessed) {
@@ -59,8 +61,12 @@ func (w *PopularityWorker) Handle(ctx context.Context, event mq.Envelope) error 
 			return err
 		}
 
-		// 这里的 return 只是结束这个匿名函数
-		return w.videoRepo.AdjustCounters(tx, payload.VideoID, 0, 0, payload.Delta)
+		if err := w.videoRepo.AdjustCounters(tx, payload.VideoID, 0, 0, payload.Delta); err != nil {
+			return err
+		}
+
+		projection = popularity.NewProjection(event, payload, occurredAt)
+		return w.projectionRepo.Enqueue(tx, projection)
 	}); err != nil {
 		return err
 	}
@@ -69,15 +75,20 @@ func (w *PopularityWorker) Handle(ctx context.Context, event mq.Envelope) error 
 	}
 
 	if w.service == nil {
-		log.Printf("popularity worker: redis unavailable, persisted mysql only event_type=%s event_id=%s", event.EventType, event.EventID)
-		invalidateVideoDetailCache(w.detailCache, payload.VideoID)
+		log.Printf("popularity worker: redis unavailable, queued replay after mysql commit event_type=%s event_id=%s", event.EventType, event.EventID)
+		invalidateVideoDetailCache(w.detailCache, nil, payload.VideoID)
 		return nil
 	}
 
-	if err := w.service.Record(ctx, payload.VideoID, float64(payload.Delta), occurredAt); err != nil {
-		return err
+	if err := w.service.RecordEvent(ctx, projection.EventID, projection.VideoID, float64(projection.Delta), projection.OccurredAt); err != nil {
+		log.Printf("popularity worker: defer redis projection to poller event_type=%s event_id=%s err=%v", event.EventType, event.EventID, err)
+		invalidateVideoDetailCache(w.detailCache, nil, payload.VideoID)
+		return nil
 	}
-	invalidateVideoDetailCache(w.detailCache, payload.VideoID)
+	if err := w.projectionRepo.Delete(projection.ID); err != nil {
+		log.Printf("popularity worker: delete applied projection failed, poller will retry cleanup event_id=%s err=%v", projection.EventID, err)
+	}
+	invalidateVideoDetailCache(w.detailCache, nil, payload.VideoID)
 
 	return nil
 }

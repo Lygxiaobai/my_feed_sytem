@@ -12,6 +12,7 @@ const (
 	ExchangeSocialEvents     = "social.events"
 	ExchangePopularityEvents = "popularity.events"
 	ExchangeVideoTimeline    = "video.timeline.events"
+	ExchangeCacheInvalidated = "cache.invalidate.events"
 )
 
 const (
@@ -201,6 +202,18 @@ func DeclareTopology(conn *amqp.Connection) error {
 		); err != nil {
 			return fmt.Errorf("bind dlq %s to dlx %s: %w", spec.DLQ, spec.DLX, err)
 		}
+	}
+
+	if err := ch.ExchangeDeclare(
+		ExchangeCacheInvalidated,
+		"fanout",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	); err != nil {
+		return fmt.Errorf("declare exchange %s: %w", ExchangeCacheInvalidated, err)
 	}
 
 	return nil

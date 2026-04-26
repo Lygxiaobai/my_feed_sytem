@@ -89,7 +89,8 @@ func (w *LikeWorker) handleLikeCreated(ctx context.Context, event mq.Envelope) e
 			Delta:   int64(popularity.LikeWeight),
 			Reason:  mq.EventTypeLikeCreated,
 		})
-		invalidateVideoDetailCache(w.detailCache, payload.VideoID)
+		//失效
+		invalidateVideoDetailCache(w.detailCache, w.publisher, payload.VideoID)
 	}
 
 	return nil
@@ -140,7 +141,7 @@ func (w *LikeWorker) handleLikeDeleted(ctx context.Context, event mq.Envelope) e
 			Delta:   int64(popularity.UnlikeWeight),
 			Reason:  mq.EventTypeLikeDeleted,
 		})
-		invalidateVideoDetailCache(w.detailCache, payload.VideoID)
+		invalidateVideoDetailCache(w.detailCache, w.publisher, payload.VideoID)
 	}
 
 	return nil

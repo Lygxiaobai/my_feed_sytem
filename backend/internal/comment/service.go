@@ -11,6 +11,7 @@ import (
 	"gorm.io/gorm"
 
 	"my_feed_system/internal/mq"
+	"my_feed_system/internal/observability"
 	"my_feed_system/internal/popularity"
 	"my_feed_system/internal/video"
 )
@@ -262,14 +263,26 @@ func nextCommentID() uint64 {
 }
 
 func (s *Service) invalidateDetailCache(videoID uint64) {
-	if s.detailCache == nil {
+	if s.detailCache == nil && s.publisher == nil {
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := s.detailCache.Delete(ctx, videoID); err != nil {
-		log.Printf("comment service: delete detail cache failed for video %d: %v", videoID, err)
+	if s.detailCache != nil {
+		if err := s.detailCache.Delete(ctx, videoID); err != nil {
+			log.Printf("comment service: delete detail cache failed for video %d: %v", videoID, err)
+		} else {
+			observability.IncCacheInvalidation(observability.CacheVideoDetail, "l2", "write")
+		}
+	}
+	if s.publisher != nil {
+		if err := s.publisher.PublishCacheInvalidated(ctx, mq.CacheInvalidatedPayload{
+			Cache:   mq.CacheNameVideoDetail,
+			VideoID: videoID,
+		}); err != nil {
+			log.Printf("comment service: publish detail invalidation failed for video %d: %v", videoID, err)
+		}
 	}
 }

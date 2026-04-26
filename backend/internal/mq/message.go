@@ -26,6 +26,12 @@ const (
 	EventTypeSocialUnfollowed  = "social.unfollowed"
 	EventTypePopularityChanged = "popularity.changed"
 	EventTypeVideoTimelinePush = "video.timeline.publish"
+	EventTypeCacheInvalidated  = "cache.invalidated"
+)
+
+const (
+	CacheNameVideoDetail = "video.detail"
+	CacheNameFeedLatest  = "feed.latest"
 )
 
 type Envelope struct {
@@ -106,4 +112,10 @@ type VideoTimelinePayload struct {
 	VideoID   uint64    `json:"video_id"`
 	AuthorID  uint64    `json:"author_id"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type CacheInvalidatedPayload struct {
+	Cache   string `json:"cache"`
+	VideoID uint64 `json:"video_id,omitempty"`
+	Version int64  `json:"version,omitempty"`
 }

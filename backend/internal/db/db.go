@@ -16,6 +16,7 @@ import (
 	"my_feed_system/internal/like"
 	"my_feed_system/internal/mq"
 	"my_feed_system/internal/outbox"
+	"my_feed_system/internal/popularity"
 	"my_feed_system/internal/social"
 	"my_feed_system/internal/video"
 )
@@ -57,6 +58,7 @@ func NewMySQL(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		&mq.ProcessedMessage{},
 		&idempotency.Key{},
 		&outbox.Message{},
+		&popularity.Projection{},
 	); err != nil {
 		return nil, fmt.Errorf("auto migrate tables: %w", err)
 	}

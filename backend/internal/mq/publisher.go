@@ -103,7 +103,17 @@ func exchangeAndKey(eventType string) (exchange string, routingKey string, err e
 		return ExchangePopularityEvents, eventType, nil
 	case EventTypeVideoTimelinePush:
 		return ExchangeVideoTimeline, eventType, nil
+	case EventTypeCacheInvalidated:
+		return ExchangeCacheInvalidated, "", nil
 	default:
 		return "", "", fmt.Errorf("unknown event type: %s", eventType)
 	}
+}
+
+func (p *Publisher) PublishCacheInvalidated(ctx context.Context, payload CacheInvalidatedPayload) error {
+	event, err := NewEnvelope(EventTypeCacheInvalidated, ProducerWorker, payload)
+	if err != nil {
+		return fmt.Errorf("build cache.invalidated event: %w", err)
+	}
+	return p.Publish(ctx, event)
 }

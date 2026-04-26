@@ -6,19 +6,32 @@ import (
 	"time"
 
 	"my_feed_system/internal/mq"
+	"my_feed_system/internal/observability"
 	"my_feed_system/internal/video"
 )
 
-func invalidateVideoDetailCache(cache *video.DetailCache, videoID uint64) {
-	if cache == nil {
+func invalidateVideoDetailCache(cache *video.DetailCache, publisher *mq.Publisher, videoID uint64) {
+	if cache == nil && publisher == nil {
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	if err := cache.Delete(ctx, videoID); err != nil {
-		log.Printf("worker: invalidate video detail cache failed, video_id=%d err=%v", videoID, err)
+	if cache != nil {
+		if err := cache.Delete(ctx, videoID); err != nil {
+			log.Printf("worker: invalidate video detail cache failed, video_id=%d err=%v", videoID, err)
+		} else {
+			observability.IncCacheInvalidation(observability.CacheVideoDetail, "l2", "write")
+		}
+	}
+	if publisher != nil {
+		if err := publisher.PublishCacheInvalidated(ctx, mq.CacheInvalidatedPayload{
+			Cache:   mq.CacheNameVideoDetail,
+			VideoID: videoID,
+		}); err != nil {
+			log.Printf("worker: publish detail invalidation failed, video_id=%d err=%v", videoID, err)
+		}
 	}
 }
 

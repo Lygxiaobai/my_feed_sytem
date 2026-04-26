@@ -85,7 +85,8 @@ func main() {
 	commentWorker := workerpkg.NewCommentWorker(database, publisher, detailCache)
 	socialWorker := workerpkg.NewSocialWorker(database)
 	popularityWorker := workerpkg.NewPopularityWorker(database, popularityService, detailCache)
-	timelineConsumer := workerpkg.NewTimelineConsumer(timelineStore, latestCache)
+	timelineConsumer := workerpkg.NewTimelineConsumer(timelineStore, latestCache, publisher)
+	popularityProjectionPoller := popularity.NewProjectionPoller(popularity.NewProjectionRepo(database), popularityService)
 
 	consumerTagPrefix := strings.TrimSpace(cfg.RabbitMQ.ConsumerTag)
 	if consumerTagPrefix == "" {
@@ -114,6 +115,15 @@ func main() {
 	start(mq.QueueSocialWrite, "social", socialWorker.Handle)
 	start(mq.QueuePopularityUpdate, "popularity", popularityWorker.Handle)
 	start(mq.QueueTimelineUpdate, "timeline", timelineConsumer.Handle)
+
+	if popularityService != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			log.Printf("popularity projection poller started")
+			popularityProjectionPoller.Run(ctx)
+		}()
+	}
 
 	select {
 	case <-ctx.Done():

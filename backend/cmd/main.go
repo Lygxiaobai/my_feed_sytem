@@ -8,18 +8,23 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
+	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 
+	"my_feed_system/internal/cachex"
 	"my_feed_system/internal/config"
 	"my_feed_system/internal/db"
+	"my_feed_system/internal/feed"
 	httpserver "my_feed_system/internal/http"
 	"my_feed_system/internal/mq"
 	"my_feed_system/internal/observability"
 	"my_feed_system/internal/outbox"
 	"my_feed_system/internal/popularity"
+	"my_feed_system/internal/video"
 )
 
 const serverShutdownTimeout = 5 * time.Second
@@ -58,15 +63,44 @@ func main() {
 		redisCmd = redisClient
 	}
 
-	if rabbitConn, err := mq.Dial(cfg.RabbitMQ); err != nil {
+	//视频详细缓存
+	localDetailStore, err := cachex.NewBytesCache(observability.CacheVideoDetail, 32<<20)
+	if err != nil {
+		log.Fatalf("create local detail cache failed: %v", err)
+	}
+	defer localDetailStore.Close()
+	localDetailCache := video.NewLocalDetailCache(localDetailStore)
+
+	//最新视频缓存
+	// latest/hot 页只缓存热点结果，容量可以明显小于 detail L1。
+	localLatestStore, err := cachex.NewBytesCache(observability.CacheFeedLatest, 16<<20)
+	if err != nil {
+		log.Fatalf("create local latest feed cache failed: %v", err)
+	}
+	defer localLatestStore.Close()
+	localLatestCache := feed.NewLocalLatestPageCache(localLatestStore)
+
+	//热榜视频页缓存
+	localHotStore, err := cachex.NewBytesCache(observability.CacheFeedHot, 16<<20)
+	if err != nil {
+		log.Fatalf("create local hot feed cache failed: %v", err)
+	}
+	defer localHotStore.Close()
+	localHotCache := feed.NewLocalHotPageCache(localHotStore)
+
+	var rabbitConn *amqp.Connection
+	if conn, err := mq.Dial(cfg.RabbitMQ); err != nil {
 		log.Printf("connect rabbitmq failed, API will continue in degraded mode and outbox will retry later: %v", err)
 	} else {
+		rabbitConn = conn
 		if err := mq.DeclareTopology(rabbitConn); err != nil {
 			log.Printf("declare rabbitmq topology failed, outbox will retry later: %v", err)
 		}
-		if closeErr := rabbitConn.Close(); closeErr != nil {
-			log.Printf("close rabbitmq failed: %v", closeErr)
-		}
+		defer func() {
+			if closeErr := rabbitConn.Close(); closeErr != nil {
+				log.Printf("close rabbitmq failed: %v", closeErr)
+			}
+		}()
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -77,9 +111,46 @@ func main() {
 	}
 
 	publisher := mq.NewResilientPublisher(cfg.RabbitMQ)
+	//视频已经发出redis未成功写入
 	go outbox.NewPoller(outbox.NewRepo(database), publisher).Run(ctx)
 
-	router := httpserver.NewRouter(database, redisCmd, popularityService, publisher, cfg.JWT.Secret, cfg.Upload.Dir)
+	router := httpserver.NewRouterWithLocalCaches(
+		database,
+		redisCmd,
+		popularityService,
+		publisher,
+		localDetailCache,
+		localLatestCache,
+		localHotCache,
+		cfg.JWT.Secret,
+		cfg.Upload.Dir,
+	)
+	if rabbitConn != nil {
+		//L1缓存失效的处理
+		detailInvalidationConsumer := video.NewDetailInvalidationConsumer(localDetailCache)
+		latestInvalidationConsumer := feed.NewLatestInvalidationConsumer(localLatestCache)
+		consumerTagPrefix := strings.TrimSpace(cfg.RabbitMQ.ConsumerTag)
+		if consumerTagPrefix == "" {
+			consumerTagPrefix = "feed-api"
+		}
+		go func() {
+			tag := fmt.Sprintf("%s-cache-invalidator", consumerTagPrefix)
+			log.Printf("cache invalidation consumer started: exchange=%s tag=%s", mq.ExchangeCacheInvalidated, tag)
+			handle := func(ctx context.Context, event mq.Envelope) error {
+				// 同一个 fanout 通道上按 cache name 分发到各自的本地失效处理器。
+				if err := detailInvalidationConsumer.Handle(ctx, event); err != nil {
+					return err
+				}
+				return latestInvalidationConsumer.Handle(ctx, event)
+			}
+			//消费广播消息
+			if err := mq.ConsumeEphemeralFanout(ctx, rabbitConn, mq.ExchangeCacheInvalidated, tag, cfg.RabbitMQ.PrefetchCount, handle); err != nil && ctx.Err() == nil {
+				log.Printf("cache invalidation consumer stopped: %v", err)
+			}
+		}()
+	}
+
+	//服务的启动和退出
 	addr := fmt.Sprintf(":%d", cfg.Server.Port)
 	server := &http.Server{
 		Addr:    addr,

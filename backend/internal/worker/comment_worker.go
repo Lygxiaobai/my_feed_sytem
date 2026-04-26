@@ -97,7 +97,7 @@ func (w *CommentWorker) handleCommentCreated(ctx context.Context, event mq.Envel
 			Delta:   int64(popularity.CommentPublishWeight),
 			Reason:  mq.EventTypeCommentCreated,
 		})
-		invalidateVideoDetailCache(w.detailCache, payload.VideoID)
+		invalidateVideoDetailCache(w.detailCache, w.publisher, payload.VideoID)
 	}
 
 	return nil
@@ -144,7 +144,7 @@ func (w *CommentWorker) handleCommentDeleted(ctx context.Context, event mq.Envel
 			Delta:   int64(popularity.CommentDeleteWeight) * deletedCount,
 			Reason:  mq.EventTypeCommentDeleted,
 		})
-		invalidateVideoDetailCache(w.detailCache, payload.VideoID)
+		invalidateVideoDetailCache(w.detailCache, w.publisher, payload.VideoID)
 	}
 
 	return nil
