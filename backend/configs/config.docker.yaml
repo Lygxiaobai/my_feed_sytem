@@ -1,0 +1,38 @@
+server:
+  port: 8080
+
+database:
+  host: mysql
+  port: 3306
+  user: root
+  password: 123456
+  dbname: my_feed_system
+
+redis:
+  host: redis
+  port: 6379
+  password: ""
+  db: 0
+
+rabbitmq:
+  host: rabbitmq
+  port: 5672
+  username: admin
+  password: password123
+  vhost: /
+  prefetch_count: 16
+  consumer_tag: feed-worker
+
+jwt:
+  secret: my-feed-system-secret
+
+upload:
+  dir: /app/.run/uploads
+
+pprof:
+  api:
+    enabled: false
+    addr: 0.0.0.0:6060
+  worker:
+    enabled: false
+    addr: 0.0.0.0:6061

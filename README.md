@@ -1,120 +1,95 @@
 # my_feed_system
 
-这是一个本地短视频 Feed 系统示例项目，当前仓库主要包含：
+`my_feed_system` 是一个短视频 Feed 流系统，当前仓库包含：
 
-- `backend/`：Go 编写的 API 服务与异步 worker
-- `frontend/`：Vue 3 + Vite 本地联调页面
-- `nginx/`：可选的本地代理配置
+- `backend/`：Go 编写的 API 服务与异步 Worker
+- `frontend/`：Vue 3 + Vite 前端页面
+- `nginx/`：本地代理相关配置
 
-## 本地开发依赖
+## 1. 项目概览
 
-开始本地开发前，请先准备好以下环境：
+系统能力覆盖：
 
-- Go `1.25+`
-- Node.js `20+`
-- MySQL `8+`
-- Redis `6+`
-- RabbitMQ `3+`
+- 账号：注册、登录、改名、改密、登出、查询资料
+- 视频：上传视频、上传封面、发布、详情、作者视频列表、点赞视频列表
+- 互动：点赞、取消点赞、评论、删除评论、关注、取关
+- Feed：最新流、点赞排行流、热榜流、关注流
+- 工程能力：Redis 缓存、RabbitMQ 异步 Worker、Outbox、幂等、限流、指标与 pprof
 
-仓库内提供的一键启动脚本只负责拉起项目自身进程，不会帮你启动 MySQL、Redis 和 RabbitMQ，这几个基础服务需要你本机先运行好。
+详细设计说明见 [my_feed_system系统设计说明.md](/d:/Go_Project/my_feed_system/my_feed_system系统设计说明.md)。
 
-后端默认读取配置文件 [backend/configs/config.yaml](/d:/Go_Project/my_feed_system/backend/configs/config.yaml)。
-当前默认端口如下：
+## 2. Docker Compose 一键启动（推荐）
 
-- API：`8081`
-- MySQL：`3306`
-- Redis：`6379`
-- RabbitMQ：`5672`
+要求：已安装 Docker Desktop / Docker Engine + Docker Compose。
 
-如果你的本地环境端口、账号或密码不同，建议先修改 `backend/configs/config.yaml` 再启动。
-
-## 一键启动本机联调
-
-在仓库根目录执行：
-
-```powershell
-.\start-local.ps1
+```bash
+docker compose up -d --build
 ```
 
-如果你的 PowerShell 执行策略拦截了本地脚本，可以改用：
+访问：
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\start-local.ps1
+- 前端：`http://localhost:5173`
+- 后端 API：`http://localhost:8080`
+- RabbitMQ 管理台：`http://localhost:15672`（默认账号 `admin` / `password123`）
+
+说明：
+
+- Compose 会启动 `mysql`、`redis`、`rabbitmq`、`backend`（API）、`worker`、`frontend`。
+- 容器内后端配置使用 `backend/configs/config.docker.yaml`（会挂载到 `/app/configs/config.yaml`）。
+- 上传文件保存到命名卷 `uploads_data`。
+- MySQL 会自动创建数据库 `my_feed_system`，应用启动时会自动执行 GORM 迁移。
+- 如果本机端口已被占用，可以通过环境变量覆盖宿主机端口，例如设置 `RABBITMQ_MANAGEMENT_PORT=15673` 再执行启动命令。
+
+停止并清理容器：
+
+```bash
+docker compose down
 ```
 
-该脚本会自动启动以下进程：
+如果还要连同数据卷一起清理：
 
-- `backend/cmd`：后端 API 服务
-- `backend/cmd/worker`：异步 worker
-- `frontend`：Vite 开发服务器
-
-如果 `frontend/node_modules` 不存在，脚本会自动执行一次 `npm install`。
-
-启动成功后，默认访问地址如下：
-
-- 前端页面：`http://127.0.0.1:5173`
-- 后端接口：`http://127.0.0.1:8081`
-
-运行日志会写入 `.run/dev/logs/`，进程状态会记录到 `.run/dev/pids.json`。
-
-停止本地联调环境：
-
-```powershell
-.\stop-local.ps1
+```bash
+docker compose down -v
 ```
 
-## 手动启动方式
+## 3. 本地手动运行
 
-如果你想单独排查某个服务，也可以分别启动。
+如果你不想走 Compose，也可以分别启动：
 
-启动后端 API：
+后端 API：
 
 ```powershell
 cd .\backend
 go run ./cmd
 ```
 
-启动 worker：
+Worker：
 
 ```powershell
 cd .\backend
 go run ./cmd/worker
 ```
 
-启动前端：
+前端：
 
 ```powershell
 cd .\frontend
+npm install
 npm run dev
 ```
 
-## 前后端联调说明
+默认本地配置文件是 [backend/configs/config.yaml](/d:/Go_Project/my_feed_system/backend/configs/config.yaml)，本地开发端口如下：
 
-前端通过 Vite 代理转发接口，请求规则定义在 [frontend/vite.config.ts](/d:/Go_Project/my_feed_system/frontend/vite.config.ts)。
+- API：`127.0.0.1:8081`
+- Redis：`127.0.0.1:6379`
+- RabbitMQ：`127.0.0.1:5672`
+- 前端：`127.0.0.1:5173`
 
-默认代理关系如下：
+## 4. 前后端联调方式
+
+开发态前端通过 Vite 代理对接本地后端，规则定义在 [frontend/vite.config.ts](/d:/Go_Project/my_feed_system/frontend/vite.config.ts)：
 
 - `/api/*` -> `http://127.0.0.1:8081/*`
 - `/static/*` -> `http://127.0.0.1:8081/static/*`
 
-也就是说，前端本地开发时直接访问 `5173` 即可，接口会自动转发到后端 `8081`。
-
-## Nginx 本地访问方式
-
-如果你希望通过 Nginx 访问页面，而不是直接使用 Vite 开发服务器，可以执行：
-
-```powershell
-.\nginx\start-dev.ps1
-```
-
-然后访问：
-
-```text
-http://127.0.0.1:8090
-```
-
-停止 Nginx：
-
-```powershell
-.\nginx\stop-dev.ps1
-```
+容器态前端则由 Nginx 反代到容器内 `backend:8080`，配置位于 [frontend/nginx.conf](/d:/Go_Project/my_feed_system/frontend/nginx.conf)。

@@ -10,6 +10,7 @@ Thumbs.db
 # Development docs not intended for submission
 /*.md
 !README.md
+!my_feed_system系统设计说明.md
 
 # Go test files and coverage artifacts
 *_test.go
