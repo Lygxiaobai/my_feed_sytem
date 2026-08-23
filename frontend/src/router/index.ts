@@ -16,6 +16,7 @@ import AdminUsersView from '../views/admin/AdminUsersView.vue'
 import AdminOpsView from '../views/admin/AdminOpsView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
 import WalletView from '../views/WalletView.vue'
+import InvoiceView from '../views/InvoiceView.vue'
 import PasswordLoginView from '../views/PasswordLoginView.vue'
 import CheckinView from '../views/CheckinView.vue'
 import LotteryView from '../views/LotteryView.vue'
@@ -37,6 +38,7 @@ const router = createRouter({
     { path: '/s/:code', name: 'share-landing', component: ShareLandingView, props: true },
     { path: '/account', name: 'account', component: AccountView },
     { path: '/wallet', name: 'wallet', component: WalletView },
+    { path: '/invoice', name: 'invoice', component: InvoiceView },
     { path: '/checkin', name: 'checkin', component: CheckinView },
     { path: '/lottery', name: 'lottery', component: LotteryView },
     { path: '/account/password', name: 'account-password', component: PasswordLoginView },

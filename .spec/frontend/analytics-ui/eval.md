@@ -27,7 +27,7 @@ scenarios:
       - desktop
   - name: successful-wallet-events-are-recorded
     description: A signed-in user completes a tip, a paid recharge, a check-in, and a lottery draw.
-    expected: wallet_tip, wallet_recharge, wallet_checkin, and wallet_lottery are reported only after those APIs succeed. Creating a recharge QR code does not emit wallet_recharge. Failed tip or claim requests do not record the event.
+    expected: wallet_tip, wallet_recharge, wallet_checkin, and wallet_lottery are reported only after those APIs succeed. Creating a recharge checkout does not emit wallet_recharge. Failed tip or claim requests do not record the event.
     tags:
       - frontend-e2e
       - desktop

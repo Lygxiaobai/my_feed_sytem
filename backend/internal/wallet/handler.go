@@ -2,6 +2,7 @@ package wallet
 
 import (
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 
@@ -19,7 +20,7 @@ func NewHandler(service *Service) *Handler {
 }
 
 func (h *Handler) RegisterPublicRoutes(rg *gin.RouterGroup) {
-	rg.POST("/alipay/notify", h.AlipayNotify)
+	rg.POST("/stripe/notify", h.StripeNotify)
 }
 
 func (h *Handler) RegisterProtectedRoutes(rg *gin.RouterGroup) {
@@ -88,16 +89,19 @@ func (h *Handler) CreateRecharge(c *gin.Context) {
 		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
 		return
 	}
-	order, qrCode, err := h.service.CreateRecharge(c.GetUint64("account_id"), req)
+	order, checkout, err := h.service.CreateRecharge(c.GetUint64("account_id"), req)
 	if err != nil {
 		writeWalletError(c, err)
 		return
 	}
-	response.OK(c, gin.H{
-		"order":    orderView(order),
-		"qr_code":  qrCode,
-		"qr_image": qrImageDataURL(qrCode),
-	})
+	out := gin.H{
+		"order":  orderView(order),
+		"method": checkout.Method,
+	}
+	if checkout.CheckoutURL != "" {
+		out["checkout_url"] = checkout.CheckoutURL
+	}
+	response.OK(c, out)
 }
 
 func (h *Handler) QueryOrder(c *gin.Context) {
@@ -153,19 +157,20 @@ func (h *Handler) ListVideoTips(c *gin.Context) {
 	response.OK(c, gin.H{"tips": items})
 }
 
-// AlipayNotify 必须回明文 success，不能走统一信封。
-func (h *Handler) AlipayNotify(c *gin.Context) {
-	if err := c.Request.ParseForm(); err != nil {
-		slog.Warn("alipay notify parse failed", slog.String("error", err.Error()))
-		c.String(http.StatusOK, "fail")
+// StripeNotify 必须读原始 body 验签，不能走统一信封。
+func (h *Handler) StripeNotify(c *gin.Context) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 1<<20))
+	if err != nil {
+		slog.Warn("stripe notify read failed", slog.String("error", err.Error()))
+		c.String(http.StatusBadRequest, "fail")
 		return
 	}
-	if err := h.service.HandleNotify(c.Request.PostForm); err != nil {
-		slog.Warn("alipay notify rejected", slog.String("error", err.Error()))
-		c.String(http.StatusOK, "fail")
+	if err := h.service.HandleStripeNotify(body, c.GetHeader("Stripe-Signature")); err != nil {
+		slog.Warn("stripe notify rejected", slog.String("error", err.Error()))
+		c.String(http.StatusBadRequest, "fail")
 		return
 	}
-	c.String(http.StatusOK, "success")
+	c.String(http.StatusOK, "ok")
 }
 
 func writeWalletError(c *gin.Context, err error) {
@@ -178,12 +183,14 @@ func writeWalletError(c *gin.Context, err error) {
 		response.FailTip(c, http.StatusTooManyRequests, response.DuplicatedRequest, "操作过于频繁，请稍后再试", err)
 	case errors.Is(err, ErrAlreadyClaimed):
 		response.FailTip(c, http.StatusConflict, response.DuplicatedRequest, "今天已经领取过了", err)
-	case errors.Is(err, ErrPayNotConfigured):
-		response.FailTip(c, http.StatusServiceUnavailable, response.ThirdPartyError, "支付未配置", err)
+	case errors.Is(err, ErrStripeNotConfigured):
+		response.FailTip(c, http.StatusServiceUnavailable, response.ThirdPartyError, "Stripe 未配置", err)
 	case errors.Is(err, ErrOrderNotFound), errors.Is(err, ErrOrderNotOwned), errors.Is(err, ErrVideoNotTippable):
 		response.Fail(c, http.StatusNotFound, response.ResourceNotFound, err)
 	case errors.Is(err, ErrInvalidAmount):
 		response.FailTip(c, http.StatusBadRequest, response.ParamError, "金额不正确", err)
+	case errors.Is(err, ErrInvalidPayMethod):
+		response.FailTip(c, http.StatusBadRequest, response.ParamError, "支付方式不正确", err)
 	default:
 		response.Fail(c, http.StatusInternalServerError, response.SystemError, err)
 	}

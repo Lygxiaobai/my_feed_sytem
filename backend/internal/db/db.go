@@ -17,6 +17,7 @@ import (
 	"my_feed_system/internal/dm"
 	"my_feed_system/internal/history"
 	"my_feed_system/internal/idempotency"
+	"my_feed_system/internal/invoice"
 	"my_feed_system/internal/like"
 	"my_feed_system/internal/media"
 	"my_feed_system/internal/mq"
@@ -88,6 +89,8 @@ func NewMySQL(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		&wallet.RechargeOrder{},
 		&wallet.TipRecord{},
 		&wallet.PlatformEntry{},
+		&invoice.Profile{},
+		&invoice.Invoice{},
 		&recommend.VideoEmbedding{},
 		&recommend.UserEmbedding{},
 	); err != nil {

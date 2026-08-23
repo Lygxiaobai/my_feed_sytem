@@ -45,3 +45,8 @@ scenarios:
     expected: Coins are granted once and the order stays paid.
     tags:
       - backend-api
+  - name: recharge-stripe-checkout
+    description: Creating a recharge with no method or method=stripe.
+    expected: The API returns a Stripe Checkout URL and credits only after a paid session query or verified webhook. A request for another payment method is rejected.
+    tags:
+      - backend-api

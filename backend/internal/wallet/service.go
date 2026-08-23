@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -27,7 +26,7 @@ type Service struct {
 	db          *gorm.DB
 	repo        *Repo
 	videoRepo   *video.Repo
-	gateway     Gateway
+	stripe      StripeGateway
 	publisher   *mq.Publisher
 	outboxRepo  *outbox.Repo
 	popularity  *popularity.Service
@@ -50,8 +49,8 @@ func (s *Service) SetInterestInvalidator(v interestInvalidator) {
 	s.interest = v
 }
 
-func NewService(db *gorm.DB, alipay config.AlipayConfig) *Service {
-	s := &Service{
+func NewService(db *gorm.DB) *Service {
+	return &Service{
 		db:          db,
 		repo:        NewRepo(db),
 		videoRepo:   video.NewRepo(db),
@@ -59,13 +58,15 @@ func NewService(db *gorm.DB, alipay config.AlipayConfig) *Service {
 		draw:        randomLotteryBucket,
 		drawCheckin: randomCheckinBucket,
 	}
-	if client, err := NewAlipayClient(alipay); err == nil {
-		s.gateway = client
-	}
-	return s
 }
 
-func (s *Service) SetGateway(g Gateway) { s.gateway = g }
+func (s *Service) ConfigureStripe(cfg config.StripeConfig) {
+	if client, err := NewStripeClient(cfg); err == nil {
+		s.stripe = client
+	}
+}
+
+func (s *Service) SetStripe(g StripeGateway) { s.stripe = g }
 
 func (s *Service) SetPublisher(publisher *mq.Publisher, popularityService *popularity.Service) {
 	s.publisher = publisher
@@ -304,18 +305,22 @@ func (s *Service) ListVideoTips(viewerID uint64, req ListVideoTipsRequest) ([]Ti
 	return items, err
 }
 
-func (s *Service) CreateRecharge(accountID uint64, req CreateRechargeRequest) (*RechargeOrder, string, error) {
-	if s.gateway == nil {
-		return nil, "", ErrPayNotConfigured
-	}
+func (s *Service) CreateRecharge(accountID uint64, req CreateRechargeRequest) (*RechargeOrder, RechargeCheckout, error) {
 	coins, bonus, err := resolveRecharge(req.Yuan)
 	if err != nil {
-		return nil, "", err
+		return nil, RechargeCheckout{}, err
+	}
+	method, err := normalizePayMethod(req.Method)
+	if err != nil {
+		return nil, RechargeCheckout{}, err
+	}
+	if s.stripe == nil {
+		return nil, RechargeCheckout{}, ErrStripeNotConfigured
 	}
 	now := s.now()
 	outTradeNo, err := newOutTradeNo(accountID, now)
 	if err != nil {
-		return nil, "", err
+		return nil, RechargeCheckout{}, err
 	}
 	order := RechargeOrder{
 		AccountID:  accountID,
@@ -324,6 +329,7 @@ func (s *Service) CreateRecharge(accountID uint64, req CreateRechargeRequest) (*
 		Coins:      coins,
 		Bonus:      bonus,
 		Status:     OrderPending,
+		PayMethod:  method,
 		ExpireAt:   now.Add(OrderTTL),
 		CreatedAt:  now,
 	}
@@ -343,19 +349,25 @@ func (s *Service) CreateRecharge(accountID uint64, req CreateRechargeRequest) (*
 		}
 		return tx.Create(&order).Error
 	}); err != nil {
-		return nil, "", err
+		return nil, RechargeCheckout{}, err
 	}
 
-	qrCode, err := s.gateway.Precreate(PagePayRequest{
-		OutTradeNo:  order.OutTradeNo,
-		TotalAmount: formatYuan(order.Yuan),
-		Subject:     fmt.Sprintf("积分充值 %d 元", order.Yuan),
+	session, err := s.stripe.CreateCheckout(StripeCheckoutRequest{
+		OutTradeNo: order.OutTradeNo,
+		Yuan:       order.Yuan,
+		Subject:    fmt.Sprintf("积分充值 %d 元", order.Yuan),
+		ExpireAt:   order.ExpireAt,
 	})
 	if err != nil {
 		_ = s.db.Model(&order).Updates(map[string]any{"status": OrderClosed, "closed_at": now}).Error
-		return nil, "", err
+		return nil, RechargeCheckout{}, err
 	}
-	return &order, qrCode, nil
+	if err := s.db.Model(&order).Update("stripe_session", session.SessionID).Error; err != nil {
+		_ = s.db.Model(&order).Updates(map[string]any{"status": OrderClosed, "closed_at": now}).Error
+		return nil, RechargeCheckout{}, err
+	}
+	order.StripeSession = session.SessionID
+	return &order, RechargeCheckout{Method: method, CheckoutURL: session.URL}, nil
 }
 
 func (s *Service) QueryOrder(accountID uint64, outTradeNo string) (*RechargeOrder, error) {
@@ -369,49 +381,120 @@ func (s *Service) QueryOrder(accountID uint64, outTradeNo string) (*RechargeOrde
 	if order.AccountID != accountID {
 		return nil, ErrOrderNotOwned
 	}
-	if order.Status == OrderPending && s.gateway != nil {
-		if err := s.refreshPending(&order); err != nil {
-			slog.Warn("alipay query failed", slog.String("out_trade_no", outTradeNo), slog.String("error", err.Error()))
+	if order.Status == OrderPending && s.stripe != nil {
+		if err := s.refreshStripePending(&order); err != nil {
+			slog.Warn("stripe query failed", slog.String("out_trade_no", outTradeNo), slog.String("error", err.Error()))
 		}
 	}
 	return &order, nil
 }
 
-func (s *Service) HandleNotify(form url.Values) error {
-	if s.gateway == nil {
-		return ErrPayNotConfigured
+// FindPaidRecharge 只返回本账号已入账的充值单。未支付或未拥有都当不存在，
+// 避免发票申请变成订单枚举旁路。
+func (s *Service) FindPaidRecharge(accountID uint64, outTradeNo string) (*PaidRecharge, error) {
+	outTradeNo = strings.TrimSpace(outTradeNo)
+	if outTradeNo == "" {
+		return nil, nil
 	}
-	notify, err := s.gateway.VerifyNotify(form)
+	var order RechargeOrder
+	err := s.db.Where("out_trade_no = ? AND account_id = ? AND status = ?", outTradeNo, accountID, OrderPaid).
+		First(&order).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if paidStatus(notify.TradeStatus) {
-		return s.creditPaid(notify.OutTradeNo, notify.TradeNo, notify.TotalAmount)
-	}
-	if notify.TradeStatus == tradeClosed {
-		return s.closeOrder(notify.OutTradeNo)
-	}
-	return nil
+	return paidFromOrder(&order), nil
 }
 
-func (s *Service) refreshPending(order *RechargeOrder) error {
-	q, err := s.gateway.Query(order.OutTradeNo)
+func (s *Service) ListPaidRecharges(accountID uint64, limit, offset int) ([]PaidRecharge, error) {
+	limit, offset = clampList(limit, offset)
+	var orders []RechargeOrder
+	err := s.db.Where("account_id = ? AND status = ?", accountID, OrderPaid).
+		Order("paid_at DESC, id DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&orders).Error
+	if err != nil {
+		return nil, err
+	}
+	out := make([]PaidRecharge, 0, len(orders))
+	for i := range orders {
+		out = append(out, *paidFromOrder(&orders[i]))
+	}
+	return out, nil
+}
+
+func paidFromOrder(order *RechargeOrder) *PaidRecharge {
+	paidAt := order.CreatedAt
+	if order.PaidAt != nil {
+		paidAt = *order.PaidAt
+	}
+	return &PaidRecharge{
+		OutTradeNo: order.OutTradeNo,
+		AccountID:  order.AccountID,
+		Yuan:       order.Yuan,
+		Coins:      order.Coins,
+		Bonus:      order.Bonus,
+		PayMethod:  order.PayMethod,
+		PaidAt:     paidAt,
+	}
+}
+
+func (s *Service) HandleStripeNotify(payload []byte, sigHeader string) error {
+	if s.stripe == nil {
+		return ErrStripeNotConfigured
+	}
+	event, err := s.stripe.VerifyEvent(payload, sigHeader, s.now())
 	if err != nil {
 		return err
 	}
-	if paidStatus(q.TradeStatus) {
-		if err := s.creditPaid(order.OutTradeNo, q.TradeNo, q.TotalAmount); err != nil {
+	if event.Type != "checkout.session.completed" && event.Type != "checkout.session.async_payment_succeeded" {
+		return nil
+	}
+	if !stripePaid(event.Checkout.PaymentStatus) && event.Type != "checkout.session.completed" {
+		return nil
+	}
+	return s.creditStripe(event.OutTradeNo, event.Checkout)
+}
+
+func (s *Service) refreshStripePending(order *RechargeOrder) error {
+	if strings.TrimSpace(order.StripeSession) == "" {
+		return nil
+	}
+	session, err := s.stripe.QuerySession(order.StripeSession)
+	if err != nil {
+		return err
+	}
+	if stripePaid(session.PaymentStatus) {
+		if err := s.creditStripe(order.OutTradeNo, session); err != nil {
 			return err
 		}
 		return s.db.Where("out_trade_no = ?", order.OutTradeNo).First(order).Error
 	}
-	if q.TradeStatus == tradeClosed || s.now().After(order.ExpireAt) {
+	if s.now().After(order.ExpireAt) {
 		if err := s.closeOrder(order.OutTradeNo); err != nil {
 			return err
 		}
 		return s.db.Where("out_trade_no = ?", order.OutTradeNo).First(order).Error
 	}
 	return nil
+}
+
+func (s *Service) creditStripe(outTradeNo string, session StripeCheckout) error {
+	order, err := s.repo.findOrderByOutTradeNo(s.db, outTradeNo)
+	if err != nil {
+		return err
+	}
+	if order == nil {
+		return ErrOrderNotFound
+	}
+	if session.AmountTotal != order.Yuan*100 {
+		return fmt.Errorf("%w: amount mismatch", ErrNotifyInvalid)
+	}
+	ref := firstNonEmpty(session.PaymentRef, session.SessionID)
+	return s.creditPaid(outTradeNo, ref, formatYuan(order.Yuan))
 }
 
 func (s *Service) creditPaid(outTradeNo, tradeNo, totalAmount string) error {

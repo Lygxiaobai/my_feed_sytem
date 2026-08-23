@@ -6,9 +6,9 @@ scenarios:
     tags:
       - frontend-e2e
       - desktop
-  - name: wallet-recharge-shows-qr
+  - name: wallet-recharge-opens-stripe-checkout
     description: A signed-in user starts a packaged recharge.
-    expected: The wallet shows a sandbox payment QR code and then success or closed from the server query, not from a browser redirect.
+    expected: The wallet creates a Stripe Checkout session and redirects there. Success or closed comes from the server query, not from a browser redirect. A paid query offers to open the invoice surface. An unpaid or canceled return shows that payment was not completed and does not keep 「支付处理中」. There is no Alipay choice.
     tags:
       - frontend-e2e
       - desktop

@@ -113,12 +113,10 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       LOKI_URL: ${LOKI_URL:-http://loki:3100}
       PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
-      ALIPAY_APP_ID: ${ALIPAY_APP_ID:-}
-      ALIPAY_PRIVATE_KEY: ${ALIPAY_PRIVATE_KEY:-}
-      ALIPAY_PUBLIC_KEY: ${ALIPAY_PUBLIC_KEY:-}
-      ALIPAY_GATEWAY: ${ALIPAY_GATEWAY:-https://openapi-sandbox.dl.alipaydev.com/gateway.do}
-      ALIPAY_NOTIFY_URL: ${ALIPAY_NOTIFY_URL:-}
-      ALIPAY_RETURN_URL: ${ALIPAY_RETURN_URL:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-}
+      STRIPE_CURRENCY: ${STRIPE_CURRENCY:-usd}
     restart: unless-stopped
     depends_on:
       mysql:

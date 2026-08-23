@@ -24,7 +24,7 @@ type Config struct {
 	Audit     AuditConfig     `yaml:"audit"`
 	Auth      AuthConfig      `yaml:"auth"`
 	Ops       OpsConfig       `yaml:"ops"`
-	Alipay    AlipayConfig    `yaml:"alipay"`
+	Stripe    StripeConfig    `yaml:"stripe"`
 	Feed      FeedConfig      `yaml:"feed"`
 	Embedding EmbeddingConfig `yaml:"embedding"`
 }
@@ -152,14 +152,12 @@ func (c FanoutConfig) ActiveTTL() time.Duration {
 	return time.Duration(c.ActiveTTLHours) * time.Hour
 }
 
-// AlipayConfig 是电脑网站支付沙箱配置。密钥全部从环境变量展开，缺省时空字符串，充值接口返回未配置。
-type AlipayConfig struct {
-	AppID           string `yaml:"app_id"`
-	PrivateKey      string `yaml:"private_key"`
-	AlipayPublicKey string `yaml:"alipay_public_key"`
-	Gateway         string `yaml:"gateway"`
-	NotifyURL       string `yaml:"notify_url"`
-	ReturnURL       string `yaml:"return_url"`
+// StripeConfig 是测试用的 Checkout。密钥全部从环境变量展开，缺省时 Stripe 充值返回未配置。
+type StripeConfig struct {
+	SecretKey     string `yaml:"secret_key"`
+	WebhookSecret string `yaml:"webhook_secret"`
+	SuccessURL    string `yaml:"success_url"`
+	Currency      string `yaml:"currency"`
 }
 
 // OpsConfig 是测试邮箱运维台用的只读观测地址。
@@ -304,7 +302,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("unmarshal config file: %w", err)
 	}
 
-	cfg.Alipay.fillFromEnv()
+	cfg.Stripe.fillFromEnv()
 	cfg.Feed.Fanout.ApplyDefaults()
 	cfg.Feed.Recommend.ApplyDefaults()
 	cfg.Embedding.ApplyDefaults()
@@ -315,24 +313,18 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func (c *AlipayConfig) fillFromEnv() {
-	if strings.TrimSpace(c.AppID) == "" {
-		c.AppID = os.Getenv("ALIPAY_APP_ID")
+func (c *StripeConfig) fillFromEnv() {
+	if strings.TrimSpace(c.SecretKey) == "" {
+		c.SecretKey = os.Getenv("STRIPE_SECRET_KEY")
 	}
-	if strings.TrimSpace(c.PrivateKey) == "" {
-		c.PrivateKey = os.Getenv("ALIPAY_PRIVATE_KEY")
+	if strings.TrimSpace(c.WebhookSecret) == "" {
+		c.WebhookSecret = os.Getenv("STRIPE_WEBHOOK_SECRET")
 	}
-	if strings.TrimSpace(c.AlipayPublicKey) == "" {
-		c.AlipayPublicKey = os.Getenv("ALIPAY_PUBLIC_KEY")
+	if strings.TrimSpace(c.SuccessURL) == "" {
+		c.SuccessURL = firstNonEmptyEnv("STRIPE_SUCCESS_URL", "https://lvmouren.indevs.in/wallet")
 	}
-	if strings.TrimSpace(c.Gateway) == "" {
-		c.Gateway = firstNonEmptyEnv("ALIPAY_GATEWAY", "https://openapi-sandbox.dl.alipaydev.com/gateway.do")
-	}
-	if strings.TrimSpace(c.NotifyURL) == "" {
-		c.NotifyURL = os.Getenv("ALIPAY_NOTIFY_URL")
-	}
-	if strings.TrimSpace(c.ReturnURL) == "" {
-		c.ReturnURL = os.Getenv("ALIPAY_RETURN_URL")
+	if strings.TrimSpace(c.Currency) == "" {
+		c.Currency = firstNonEmptyEnv("STRIPE_CURRENCY", "usd")
 	}
 }
 

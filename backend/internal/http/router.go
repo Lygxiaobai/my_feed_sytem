@@ -19,6 +19,7 @@ import (
 	"my_feed_system/internal/dm"
 	"my_feed_system/internal/feed"
 	"my_feed_system/internal/history"
+	"my_feed_system/internal/invoice"
 	"my_feed_system/internal/like"
 	"my_feed_system/internal/media"
 	"my_feed_system/internal/middleware/accesslog"
@@ -47,7 +48,7 @@ func NewRouter(
 	jwtSecret string,
 	uploadDir string,
 ) *gin.Engine {
-	return NewRouterWithLocalCaches(db, redisClient, popularityService, publisher, nil, nil, nil, jwtSecret, uploadDir, 0, config.AuditConfig{}, config.AuthConfig{}, config.OpsConfig{}, config.AlipayConfig{}, config.FeedConfig{}, config.EmbeddingConfig{})
+	return NewRouterWithLocalCaches(db, redisClient, popularityService, publisher, nil, nil, nil, jwtSecret, uploadDir, 0, config.AuditConfig{}, config.AuthConfig{}, config.OpsConfig{}, config.StripeConfig{}, config.FeedConfig{}, config.EmbeddingConfig{})
 }
 
 func NewRouterWithLocalCaches(
@@ -64,7 +65,7 @@ func NewRouterWithLocalCaches(
 	auditCfg config.AuditConfig,
 	authCfg config.AuthConfig,
 	opsCfg config.OpsConfig,
-	alipayCfg config.AlipayConfig,
+	stripeCfg config.StripeConfig,
 	feedCfg config.FeedConfig,
 	embeddingCfg config.EmbeddingConfig,
 ) *gin.Engine {
@@ -219,9 +220,11 @@ func NewRouterWithLocalCaches(
 
 	notifyWriter := notification.NewWriter(db)
 
-	walletService := wallet.NewService(db, alipayCfg)
+	walletService := wallet.NewService(db)
+	walletService.ConfigureStripe(stripeCfg)
 	walletService.SetPublisher(publisher, popularityService)
 	walletService.SetNotifier(notifyWriter)
+	invoiceService := invoice.NewService(db, invoice.OrdersFromWallet(walletService))
 	accountService := account.NewServiceWithTokenCache(db, tokenCache, jwtSecret)
 	accountService.SetCreatedHook(walletService.GrantRegisterGiftTx)
 	var otpStore *account.OTPStore
@@ -630,6 +633,17 @@ func NewRouterWithLocalCaches(
 	protectedWallet.POST("/tip", walletTipIPLimit, walletTipAccountLimit, walletHandler.Tip)
 	protectedWallet.POST("/tips/mine", walletHandler.ListMyTips)
 	protectedWallet.POST("/tips/byVideo", walletHandler.ListVideoTips)
+
+	invoiceApplyLimit := ratelimit.ByAccountID(rateLimiter, ratelimit.Policy{
+		Name:     "invoice.write.account",
+		Limit:    10,
+		Window:   time.Minute,
+		FailOpen: true,
+	})
+	invoiceHandler := invoice.NewHandler(invoiceService)
+	invoiceGroup := r.Group("/invoice")
+	invoiceGroup.Use(jwtmiddleware.JWTAuthWithTokenCache(db, tokenCache, jwtSecret))
+	invoiceHandler.RegisterProtectedRoutes(invoiceGroup, invoiceApplyLimit)
 
 	return r
 }

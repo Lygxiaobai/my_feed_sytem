@@ -6,7 +6,7 @@ desc: Project-level contract for scope, spec ownership, and source-of-truth rule
 # project
 
 ## raw source
-The project provides a short-video feed system with accounts, videos, social interactions, a coin wallet for recharge and tipping, asynchronous processing, and web access.
+The project provides a short-video feed system with accounts, videos, social interactions, a coin wallet for recharge and tipping, invoices for paid recharge, asynchronous processing, and web access.
 
 ## expanded spec
 The project contract is behavior-first. It describes what the product must preserve and assigns detailed ownership to the backend, frontend, and leaf specs without duplicating their implementation details.

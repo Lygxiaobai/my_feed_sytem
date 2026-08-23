@@ -71,7 +71,7 @@ type DailyAction struct {
 
 func (DailyAction) TableName() string { return "wallet_daily_actions" }
 
-// RechargeOrder 是一笔支付宝充值单。
+// RechargeOrder 是一笔充值单。AlipayTradeNo 是历史列，现在存 Stripe 支付引用。
 type RechargeOrder struct {
 	ID            uint64     `gorm:"primaryKey" json:"id"`
 	AccountID     uint64     `gorm:"not null;index:idx_wallet_orders_account_status,priority:1" json:"account_id"`
@@ -80,7 +80,9 @@ type RechargeOrder struct {
 	Coins         int64      `gorm:"not null" json:"coins"`
 	Bonus         int64      `gorm:"not null" json:"bonus"`
 	Status        string     `gorm:"size:16;not null;index:idx_wallet_orders_account_status,priority:2" json:"status"`
+	PayMethod     string     `gorm:"size:16" json:"pay_method,omitempty"`
 	AlipayTradeNo string     `gorm:"size:64" json:"alipay_trade_no,omitempty"`
+	StripeSession string     `gorm:"size:128" json:"stripe_session,omitempty"`
 	PaidAt        *time.Time `json:"paid_at,omitempty"`
 	ClosedAt      *time.Time `json:"closed_at,omitempty"`
 	ExpireAt      time.Time  `gorm:"index" json:"expire_at"`
@@ -88,6 +90,17 @@ type RechargeOrder struct {
 }
 
 func (RechargeOrder) TableName() string { return "wallet_recharge_orders" }
+
+// PaidRecharge 是已入账充值单的只读快照。发票模块只读这个形状，不回写入账。
+type PaidRecharge struct {
+	OutTradeNo string
+	AccountID  uint64
+	Yuan       int64
+	Coins      int64
+	Bonus      int64
+	PayMethod  string
+	PaidAt     time.Time
+}
 
 // TipRecord 记录一次视频打赏。Coins 是打赏人扣掉的积分。
 type TipRecord struct {
@@ -122,8 +135,20 @@ type Summary struct {
 	NextExpireCoins   int64      `json:"next_expire_coins,omitempty"`
 }
 
+const (
+	PayMethodQR     = "qr"
+	PayMethodPage   = "page"
+	PayMethodStripe = "stripe"
+)
+
+type RechargeCheckout struct {
+	Method      string `json:"method"`
+	CheckoutURL string `json:"checkout_url,omitempty"`
+}
+
 type CreateRechargeRequest struct {
-	Yuan int64 `json:"yuan" binding:"required"`
+	Yuan   int64  `json:"yuan" binding:"required"`
+	Method string `json:"method"`
 }
 
 type TipRequest struct {

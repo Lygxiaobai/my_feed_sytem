@@ -16,10 +16,10 @@ related:
 # wallet-ui
 
 ## raw source
-A signed-in user opens a wallet from the account hub or the desktop top-bar 充积分 entry, sees spendable coins and soon-to-expire amounts, reads a ledger, and starts an Alipay sandbox recharge. Feed and video pages can send a tip or open that video's tip list. Dedicated pages cover daily check-in and lottery.
+A signed-in user opens a wallet from the account hub or the desktop top-bar 充积分 entry, sees spendable coins and soon-to-expire amounts, reads a ledger, and starts a recharge via Stripe Checkout. Feed and video pages can send a tip or open that video's tip list. Dedicated pages cover daily check-in and lottery.
 
 ## expanded spec
-The wallet page uses coins for balances and the ledger, and yuan only on the recharge controls. Creating a recharge shows a sandbox payment QR code and queries the server until the order is paid or closed. Credit never comes from a browser redirect. Recharge failures show the server message. The four internal sources are not listed as separate balances.
+The wallet page uses coins for balances and the ledger, and yuan only on the recharge controls. Starting a recharge creates a Stripe Checkout session and redirects there; the page can reopen that URL. Returning from Checkout with an order number queries the server; credit never comes from the redirect itself. A cancel return (`canceled=1`) or a still-pending order is shown as unpaid so the processing banner does not stay. A paid query offers to open the invoice surface. Recharge failures show the server message. The four internal sources are not listed as separate balances. Invoices are opened from this page onto the surface owned by `invoice-ui`.
 
 Tipping is offered only on another person's public video from the feed or video page. Preset amounts are shown as yuan with their coin equivalents, and a custom amount is entered in coins. Any signed-in user can open that video's tip list: the author sees every tip under the title 「本视频打赏」, and a non-author sees only their own tips under 「我的打赏」. An empty author list says nobody has tipped the video; an empty viewer list says the viewer has not tipped it. Authors still cannot tip their own video.
 

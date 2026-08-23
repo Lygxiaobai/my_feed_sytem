@@ -72,7 +72,11 @@ export async function listLedger(limit = 20, offset = 0) {
 }
 
 export async function createRecharge(yuan: number) {
-  return postJson<{ order: RechargeOrder; qr_code: string; qr_image: string }>('/wallet/recharge/create', { yuan }, { authRequired: true })
+  return postJson<{
+    order: RechargeOrder
+    method: 'stripe'
+    checkout_url?: string
+  }>('/wallet/recharge/create', { yuan }, { authRequired: true })
 }
 
 export async function queryRecharge(outTradeNo: string) {
@@ -125,4 +129,3 @@ export function ledgerLabel(bizType: string) {
       return bizType
   }
 }
-

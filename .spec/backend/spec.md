@@ -31,7 +31,7 @@ Failure codes identify the origin of the failure — caller, this system, or a d
 
 Both entrypoints emit structured logs through one logger with a configurable level. Log severity is a property of the log record, not of the business code: caller mistakes are warnings, failures of this system are errors. Each request carries an identifier that appears in both its response and every log record it produces, including records emitted by asynchronous work it triggers, so a reported failure can be traced back to its logs. Credentials, tokens, and query parameter values are redacted before they reach a log record. Endpoints that exist only for liveness or metrics scraping do not produce access-log records. Product-event report requests are omitted from access logs because each accepted event is written as its own product_event record.
 
-The child nodes own the detailed account, feed, video, interaction, social, wallet, notification, dm, analytics, ops, admin, report, danmaku, history, outbox, message-consumer, and runtime contracts. This parent spec owns only the process boundary and the rules that connect those nodes.
+The child nodes own the detailed account, feed, video, interaction, social, wallet, invoice, notification, dm, analytics, ops, admin, report, danmaku, history, outbox, message-consumer, and runtime contracts. This parent spec owns only the process boundary and the rules that connect those nodes.
 
 Capabilities that exist to receive user notices about content are not gated on optional moderation features. `report/spec.md` owns that channel and stays registered whether or not automated review is configured, because a switch that turns off automated review must not also remove the only way a viewer can raise a problem.
 

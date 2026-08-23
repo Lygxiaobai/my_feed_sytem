@@ -229,3 +229,12 @@ func parseDigits(s string) (int64, error) {
 func formatYuan(yuan int64) string {
 	return fmt.Sprintf("%d.00", yuan)
 }
+
+func normalizePayMethod(raw string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", PayMethodStripe, "card", "test":
+		return PayMethodStripe, nil
+	default:
+		return "", fmt.Errorf("%w: unknown pay method", ErrInvalidPayMethod)
+	}
+}

@@ -68,7 +68,7 @@ func DefaultConfig() Config {
 			"/ping",
 			"/metrics",
 			"/ops/gate",
-			"/wallet/alipay/notify",
+			"/wallet/stripe/notify",
 		},
 		SkipPrefixes: []string{"/static/"},
 	}

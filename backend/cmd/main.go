@@ -134,7 +134,7 @@ func main() {
 	publisher := mq.NewResilientPublisher(cfg.RabbitMQ)
 	//视频已经发出redis未成功写入
 	go outbox.NewPoller(outbox.NewRepo(database), publisher).Run(ctx)
-	go wallet.NewExpirePoller(wallet.NewService(database, cfg.Alipay)).Run(ctx)
+	go wallet.NewExpirePoller(wallet.NewService(database)).Run(ctx)
 
 	router := httpserver.NewRouterWithLocalCaches(
 		database,
@@ -150,7 +150,7 @@ func main() {
 		cfg.Audit,
 		cfg.Auth,
 		cfg.Ops,
-		cfg.Alipay,
+		cfg.Stripe,
 		cfg.Feed,
 		cfg.Embedding,
 	)

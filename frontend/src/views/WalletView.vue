@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { track } from '../analytics/track'
 import AppShell from '../components/AppShell.vue'
@@ -11,6 +11,7 @@ import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToastStore()
 
@@ -20,9 +21,9 @@ const summary = ref<WalletSummary | null>(null)
 const packages = ref<walletApi.RechargePackage[]>([])
 const ledgers = ref<WalletLedger[]>([])
 const customYuan = ref('')
-const payImage = ref('')
 const payingNo = ref('')
 const payYuanAmount = ref(0)
+const checkoutURL = ref('')
 const orderHint = reactive({
   text: '',
   tone: '' as '' | 'ok' | 'bad',
@@ -30,9 +31,11 @@ const orderHint = reactive({
 
 let pollTimer: number | undefined
 let pollSeq = 0
-const paying = computed(() => payImage.value !== '')
+const paying = computed(() => payingNo.value !== '')
 const POLL_INTERVAL_MS = 2000
-const POLL_MAX_TRIES = 150
+const POLL_MAX_TRIES = 5
+const PROCESSING_HINT = '支付处理中…'
+const UNPAID_HINT = '未完成支付，可重新充值'
 
 function formatTime(raw?: string) {
   if (!raw) return ''
@@ -60,27 +63,29 @@ function packageCoins(pkg: walletApi.RechargePackage) {
   return pkg.yuan * 10 + pkg.bonus
 }
 
-async function payYuan(yuan: number) {
+async function startPay(yuan: number) {
   if (!auth.isLoggedIn) {
     toast.error('请先登录')
-    await router.push('/account')
+    void router.push('/account')
     return
   }
-  if (busy.value) return
+  if (busy.value || paying.value) return
   if (!Number.isInteger(yuan) || yuan < 1) {
     toast.error('请输入不少于 1 的整元金额')
     return
   }
   busy.value = true
+  orderHint.text = ''
+  orderHint.tone = ''
   try {
     const res = await walletApi.createRecharge(yuan)
-    if (!res.qr_image) {
-      throw new Error('未拿到支付码')
+    if (!res.checkout_url) {
+      throw new Error('未拿到支付信息')
     }
-    payImage.value = res.qr_image
     payingNo.value = res.order.out_trade_no
     payYuanAmount.value = res.order.yuan
-    void pollOrder(res.order.out_trade_no)
+    checkoutURL.value = res.checkout_url
+    window.location.assign(res.checkout_url)
   } catch (e) {
     toast.error(e instanceof ApiError ? e.message : String(e))
   } finally {
@@ -96,22 +101,49 @@ function stopPoll() {
   }
 }
 
-function closePay() {
-  payImage.value = ''
+function clearPaying() {
   payingNo.value = ''
   payYuanAmount.value = 0
+  checkoutURL.value = ''
+}
+
+function markUnpaid(text = UNPAID_HINT) {
+  orderHint.text = text
+  orderHint.tone = 'bad'
+  clearPaying()
+}
+
+function closePay() {
   stopPoll()
+  clearPaying()
+  if (orderHint.text === PROCESSING_HINT) {
+    markUnpaid()
+  }
 }
 
-async function payCustom() {
-  const yuan = Number(customYuan.value)
-  await payYuan(yuan)
+function openStripe() {
+  if (!checkoutURL.value) {
+    toast.error('Stripe 页面暂不可用')
+    return
+  }
+  window.location.assign(checkoutURL.value)
 }
 
-async function pollOrder(outTradeNo: string) {
+function payCustom() {
+  void startPay(Number(customYuan.value))
+}
+
+function canceledReturn(raw: unknown) {
+  const v = String(raw ?? '').trim().toLowerCase()
+  return v === '1' || v === 'true' || v === 'yes'
+}
+
+async function settleReturnedOrder(outTradeNo: string, canceled: boolean) {
   const seq = ++pollSeq
-  orderHint.text = '支付处理中…'
-  orderHint.tone = ''
+  if (!canceled) {
+    orderHint.text = PROCESSING_HINT
+    orderHint.tone = ''
+  }
   let tries = 0
   const tick = async () => {
     if (seq !== pollSeq) return
@@ -121,29 +153,28 @@ async function pollOrder(outTradeNo: string) {
       if (seq !== pollSeq) return
       const order: RechargeOrder = res.order
       if (order.status === 'paid') {
-        orderHint.text = `充值成功，到账 ${order.coins + order.bonus} 积分`
+        orderHint.text = `充值成功，到账 ${order.coins + order.bonus} 积分，可开个人发票`
         orderHint.tone = 'ok'
         track('wallet_recharge', { yuan: order.yuan, coins: order.coins, bonus: order.bonus })
-        closePay()
+        clearPaying()
         await loadWallet()
         return
       }
       if (order.status === 'closed') {
-        orderHint.text = '订单已关闭，请重新充值'
-        orderHint.tone = 'bad'
-        closePay()
+        markUnpaid('订单已关闭，请重新充值')
         return
       }
     } catch (e) {
       if (seq !== pollSeq) return
       orderHint.text = e instanceof ApiError ? e.message : '查询订单失败'
       orderHint.tone = 'bad'
+      clearPaying()
       return
     }
     if (seq !== pollSeq) return
-    // 每 2 秒查一次，最多约 5 分钟；入账只认服务端查单，不跳沙箱收银台。
-    if (tries >= POLL_MAX_TRIES) {
-      orderHint.text = '仍在处理，稍后刷新钱包即可'
+    // 取消回跳或短轮询后仍 pending，按未支付收掉，避免「支付处理中」挂住。
+    if (canceled || tries >= POLL_MAX_TRIES) {
+      markUnpaid()
       return
     }
     pollTimer = window.setTimeout(() => {
@@ -157,6 +188,11 @@ onMounted(() => {
   if (!auth.isLoggedIn) {
     void router.push('/account')
     return
+  }
+  const returnedNo = String(route.query.out_trade_no ?? '').trim()
+  if (returnedNo) {
+    void settleReturnedOrder(returnedNo, canceledReturn(route.query.canceled))
+    void router.replace({ path: '/wallet' })
   }
   void loadWallet()
 })
@@ -172,12 +208,16 @@ onUnmounted(() => {
       <div class="row" style="justify-content: space-between">
         <p class="title" style="margin: 0">钱包</p>
         <div class="row" style="gap: 8px">
+          <button class="ghost" type="button" @click="router.push('/invoice')">发票</button>
           <button class="ghost" type="button" @click="router.push('/checkin')">签到</button>
           <button class="ghost" type="button" @click="router.push('/lottery')">抽奖</button>
           <button class="ghost" type="button" @click="router.push('/account')">返回账号</button>
         </div>
       </div>
-      <div v-if="orderHint.text" class="hint" :class="orderHint.tone" style="margin-top: 12px">{{ orderHint.text }}</div>
+      <div v-if="orderHint.text" class="hint" :class="orderHint.tone" style="margin-top: 12px">
+        <span>{{ orderHint.text }}</span>
+        <button v-if="orderHint.tone === 'ok'" class="ghost" type="button" @click="router.push('/invoice')">去开票</button>
+      </div>
       <div v-if="loading && !summary" class="subtle" style="margin-top: 12px">加载中…</div>
       <template v-else-if="summary">
         <div class="balance">{{ summary.available_coins }} <span class="unit">积分</span></div>
@@ -193,7 +233,7 @@ onUnmounted(() => {
 
     <div class="card">
       <p class="title">充值</p>
-      <p class="subtle">按元支付，1 元 = 10 积分。档位赠送一并进入充值余额，不过期。请用沙箱支付宝扫码，不要用真支付宝。</p>
+      <p class="subtle">按元支付，1 元 = 10 积分。档位赠送一并进入充值余额，不过期。点档位即打开 Stripe，测试卡 4242 4242 4242 4242，到账后可开个人发票。</p>
       <div class="pkg-grid">
         <button
           v-for="pkg in packages"
@@ -201,7 +241,7 @@ onUnmounted(() => {
           class="pkg"
           type="button"
           :disabled="busy || paying"
-          @click="payYuan(pkg.yuan)"
+          @click="startPay(pkg.yuan)"
         >
           <div class="pkg-yuan">{{ pkg.yuan }} 元</div>
           <div class="pkg-coin">到账 {{ packageCoins(pkg) }} 积分</div>
@@ -229,12 +269,12 @@ onUnmounted(() => {
     </div>
 
     <Teleport to="body">
-      <div v-if="payImage" class="pay-mask" @click.self="closePay">
+      <div v-if="paying" class="pay-mask" @click.self="closePay">
         <div class="pay-dialog" role="dialog" aria-modal="true" aria-labelledby="pay-title">
-          <p id="pay-title" class="title" style="margin: 0">扫码充值</p>
-          <img class="pay-qr" :src="payImage" alt="充值二维码" />
-          <p class="subtle">请用沙箱支付宝扫码支付 {{ payYuanAmount }} 元，不要用真支付宝。</p>
-          <p class="subtle">扫码后请保持此窗口，到账由服务器确认。</p>
+          <p id="pay-title" class="title" style="margin: 0">Stripe 充值 {{ payYuanAmount }} 元</p>
+          <p class="subtle">请在 Stripe 页面用测试卡完成支付。到期后此页会确认到账。</p>
+          <p class="subtle">付款后请保持此窗口，到账由服务器确认。</p>
+          <button v-if="checkoutURL" class="primary" type="button" @click="openStripe">打开 Stripe</button>
           <button class="ghost" type="button" @click="closePay">关闭</button>
         </div>
       </div>
@@ -269,6 +309,10 @@ onUnmounted(() => {
 }
 
 .hint {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: 12px;
   background: rgba(var(--fg), 0.06);
@@ -331,12 +375,9 @@ onUnmounted(() => {
   background: var(--surface);
 }
 
-.pay-qr {
-  width: 220px;
-  height: 220px;
-  border-radius: 12px;
-  background: #fff;
-  padding: 8px;
+.pay-dialog .primary,
+.pay-dialog .ghost {
+  width: 100%;
 }
 
 .ledger {

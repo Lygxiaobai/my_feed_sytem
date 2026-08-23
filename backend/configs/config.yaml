@@ -83,13 +83,11 @@ ops:
   loki_url: ${LOKI_URL:-http://127.0.0.1:3100}
   prometheus_url: ${PROMETHEUS_URL:-http://127.0.0.1:9090}
 
-alipay:
-  app_id: ${ALIPAY_APP_ID:-}
-  private_key: ${ALIPAY_PRIVATE_KEY:-}
-  alipay_public_key: ${ALIPAY_PUBLIC_KEY:-}
-  gateway: ${ALIPAY_GATEWAY:-https://openapi-sandbox.dl.alipaydev.com/gateway.do}
-  notify_url: ${ALIPAY_NOTIFY_URL:-}
-  return_url: ${ALIPAY_RETURN_URL:-}
+stripe:
+  secret_key: ${STRIPE_SECRET_KEY:-}
+  webhook_secret: ${STRIPE_WEBHOOK_SECRET:-}
+  success_url: ${STRIPE_SUCCESS_URL:-https://lvmouren.indevs.in/wallet}
+  currency: ${STRIPE_CURRENCY:-usd}
 
 feed:
   # 关注流推拉结合的分级阈值。粉丝数低于 push_threshold 全量写扩散；
