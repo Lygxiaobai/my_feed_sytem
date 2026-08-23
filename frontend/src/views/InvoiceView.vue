@@ -130,17 +130,14 @@ onMounted(() => {
   <AppShell>
     <div class="no-print">
       <div class="card">
-        <div class="row" style="justify-content: space-between">
+        <div class="page-head">
           <p class="title" style="margin: 0">发票</p>
-          <button class="ghost" type="button" @click="router.push('/wallet')">返回钱包</button>
+          <button class="ghost compact" type="button" @click="router.push('/wallet')">钱包</button>
         </div>
         <p class="subtle">
           只能对已到账的充值开个人发票，提交后立即得到站内消费凭证。测试环境用钱包里的 Stripe 测试卡付成功即可，不必开 Stripe Invoices 产品。这不是税务机关监制的增值税发票，开票也不会再次入账。
         </p>
-      </div>
-
-      <div class="card">
-        <p class="title">开票抬头</p>
+        <p class="title section-title">开票抬头</p>
         <label>姓名</label>
         <input v-model="profile.title" maxlength="80" placeholder="个人姓名" />
         <label>接收邮箱</label>
@@ -233,6 +230,23 @@ onMounted(() => {
   border-radius: 12px;
   padding: 10px 12px;
   cursor: pointer;
+}
+
+.ghost.compact {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  min-height: 32px;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title {
+  margin: 18px 0 10px;
 }
 
 .primary {

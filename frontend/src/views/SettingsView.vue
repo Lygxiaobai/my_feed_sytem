@@ -181,83 +181,69 @@ async function onLogout() {
       </div>
     </div>
 
-    <div v-if="!auth.isLoggedIn" class="grid two" style="margin-top: 14px">
-      <div class="card">
-        <p class="title">设置</p>
-        <p class="subtle">需要先登录后才能进行改名/退出等操作。</p>
-        <div class="row" style="margin-top: 12px; justify-content: flex-end">
-          <button class="primary" type="button" @click="goLogin">去登录</button>
-        </div>
-      </div>
-      <div class="card">
-        <p class="title">提示</p>
-        <p class="muted">登录入口在「账号」页。</p>
+    <div v-if="!auth.isLoggedIn" class="card" style="margin-top: 14px">
+      <p class="title">账号</p>
+      <p class="subtle">登录后才能改名、管理通行密钥和退出。</p>
+      <div class="tools">
+        <button class="primary compact" type="button" @click="goLogin">去登录</button>
       </div>
     </div>
 
-    <div v-else style="margin-top: 14px">
-      <div class="card">
-        <div class="row" style="justify-content: space-between; align-items: flex-start">
-          <div class="row" style="gap: 12px; align-items: center">
-            <UserAvatar :username="me.username" :id="me.id" :size="56" />
-            <div>
-              <div class="title" style="margin: 0">{{ me.username }}</div>
-            </div>
+    <div v-else class="card" style="margin-top: 14px">
+      <div class="profile-head">
+        <UserAvatar :username="me.username" :id="me.id" :size="56" />
+        <div class="profile-id">
+          <div class="title" style="margin: 0">{{ me.username }}</div>
+        </div>
+        <button class="ghost compact" type="button" :disabled="busy" @click="openRename">改名</button>
+      </div>
+
+      <div v-if="rename.open" class="grid" style="margin-top: 14px">
+        <div>
+          <label>新用户名</label>
+          <input v-model.trim="rename.newUsername" @keydown.enter="submitRename" />
+        </div>
+        <div class="tools">
+          <button class="ghost compact" type="button" :disabled="busy" @click="rename.open = false">取消</button>
+          <button class="primary compact" type="button" :disabled="busy" @click="submitRename">保存</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <p class="title">通行密钥</p>
+        <p class="subtle">登记后可在支持的设备上直接登录，不必再输入验证码。邮箱验证码仍可用来找回账号。</p>
+        <div class="grid" style="margin-top: 12px">
+          <div>
+            <label>名称（可选）</label>
+            <input v-model.trim="passkeys.name" maxlength="32" placeholder="例如：这台电脑" @keydown.enter="addPasskey" />
+          </div>
+          <div class="tools">
+            <button class="ghost compact" type="button" :disabled="busy || passkeys.loading" @click="addPasskey">
+              添加通行密钥
+            </button>
           </div>
         </div>
-
-        <div class="card" style="margin-top: 14px">
-          <div class="row" style="justify-content: space-between; align-items: center">
-            <p class="title" style="margin: 0">账号设置</p>
-            <button class="ghost" type="button" :disabled="busy" @click="openRename">改名</button>
-          </div>
-
-          <div v-if="rename.open" class="grid" style="margin-top: 12px">
+        <div v-if="passkeys.loading" class="subtle" style="margin-top: 12px">正在加载…</div>
+        <div v-else-if="passkeys.items.length === 0" class="subtle" style="margin-top: 12px">还没有通行密钥</div>
+        <div v-else class="passkey-list">
+          <div v-for="item in passkeys.items" :key="item.id" class="passkey-row">
             <div>
-              <label>new_username</label>
-              <input v-model.trim="rename.newUsername" @keydown.enter="submitRename" />
-            </div>
-            <div class="row" style="justify-content: flex-end">
-              <button type="button" :disabled="busy" @click="rename.open = false">取消</button>
-              <button class="primary" type="button" :disabled="busy" @click="submitRename">提交</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="card" style="margin-top: 14px">
-          <p class="title">通行密钥</p>
-          <p class="subtle">登记后可在支持的设备上直接登录，不必再输入验证码。邮箱验证码仍可用来找回账号。</p>
-          <div class="grid" style="margin-top: 12px">
-            <div>
-              <label>名称（可选）</label>
-              <input v-model.trim="passkeys.name" maxlength="32" placeholder="例如：这台电脑" @keydown.enter="addPasskey" />
-            </div>
-            <div class="row" style="justify-content: flex-end">
-              <button class="ghost" type="button" :disabled="busy || passkeys.loading" @click="addPasskey">添加通行密钥</button>
-            </div>
-          </div>
-          <div v-if="passkeys.loading" class="subtle" style="margin-top: 12px">正在加载…</div>
-          <div v-else-if="passkeys.items.length === 0" class="subtle" style="margin-top: 12px">还没有通行密钥</div>
-          <div v-else class="passkey-list">
-            <div v-for="item in passkeys.items" :key="item.id" class="passkey-row">
-              <div>
-                <div class="passkey-name">{{ item.name }}</div>
-                <div class="subtle">
-                  添加于 {{ formatPasskeyTime(item.created_at) }}
-                  <template v-if="item.last_used_at"> · 最近使用 {{ formatPasskeyTime(item.last_used_at) }}</template>
-                </div>
+              <div class="passkey-name">{{ item.name }}</div>
+              <div class="subtle">
+                添加于 {{ formatPasskeyTime(item.created_at) }}
+                <template v-if="item.last_used_at"> · 最近使用 {{ formatPasskeyTime(item.last_used_at) }}</template>
               </div>
-              <button class="ghost" type="button" :disabled="busy" @click="removePasskey(item)">删除</button>
             </div>
+            <button class="ghost compact" type="button" :disabled="busy" @click="removePasskey(item)">删除</button>
           </div>
         </div>
+      </div>
 
-        <div class="card" style="margin-top: 14px">
-          <p class="title">账号安全</p>
-          <div class="row">
-            <button class="ghost" type="button" :disabled="busy" @click="goChangePassword">修改密码</button>
-            <button class="danger" type="button" :disabled="busy" @click="onLogout">退出登录</button>
-          </div>
+      <div class="section">
+        <p class="title">账号安全</p>
+        <div class="tools">
+          <button class="ghost compact" type="button" :disabled="busy" @click="goChangePassword">修改密码</button>
+          <button class="danger compact" type="button" :disabled="busy" @click="onLogout">退出登录</button>
         </div>
       </div>
     </div>
@@ -276,6 +262,39 @@ async function onLogout() {
 
 .ghost:hover {
   background: var(--fill-hover);
+}
+
+.ghost.compact,
+.primary.compact,
+.danger.compact {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  min-height: 32px;
+}
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-id {
+  min-width: 0;
+  flex: 1;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }
 
 .passkey-list {

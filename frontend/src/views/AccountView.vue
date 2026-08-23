@@ -509,78 +509,64 @@ watch(
     </div>
 
     <template v-else>
-      <div class="card">
-        <div class="row" style="justify-content: space-between; align-items: flex-start">
-          <div class="row" style="gap: 12px; align-items: center">
-            <UserAvatar :username="me.username" :id="me.id" :size="64" />
-            <div>
-              <div class="title" style="margin: 0">{{ me.username }}</div>
+      <div class="card profile-card">
+        <div class="profile-head">
+          <UserAvatar :username="me.username" :id="me.id" :size="56" />
+          <div class="profile-id">
+            <div class="title" style="margin: 0">{{ me.username }}</div>
+            <div class="stats">
+              <button class="stat" type="button" :disabled="social.followersLoading" @click="openFollowers">
+                <strong>
+                  <Skeleton v-if="social.followersLoading" width="16px" height="14px" />
+                  <template v-else>{{ social.followerCount }}</template>
+                </strong>
+                粉丝
+              </button>
+              <button class="stat" type="button" :disabled="social.vloggersLoading" @click="openFollowing">
+                <strong>
+                  <Skeleton v-if="social.vloggersLoading" width="16px" height="14px" />
+                  <template v-else>{{ social.followingCount }}</template>
+                </strong>
+                关注
+              </button>
+              <span class="stat static">
+                <strong>
+                  <Skeleton v-if="myVideos.loading" width="16px" height="14px" />
+                  <template v-else>{{ totalReceivedLikes }}</template>
+                </strong>
+                获赞
+              </span>
             </div>
-          </div>
-
-          <div class="row">
-            <button class="ghost" type="button" @click="router.push('/checkin')">签到</button>
-            <button class="ghost" type="button" @click="router.push('/lottery')">抽奖</button>
-            <button class="ghost" type="button" @click="goWallet">钱包</button>
-            <button v-if="adminAllowed" class="ghost" type="button" @click="goAdmin">管理后台</button>
-            <button class="ghost" type="button" @click="goSettings">设置</button>
+            <div v-if="socialErrorHint" class="subtle">社交信息加载失败：{{ socialErrorHint }}</div>
           </div>
         </div>
 
-        <div class="row" style="margin-top: 14px">
-          <button class="metric" type="button" :disabled="social.followersLoading" @click="openFollowers">
-            <div class="metric-num">
-              <Skeleton v-if="social.followersLoading" width="28px" height="18px" />
-              <template v-else>{{ social.followerCount }}</template>
-            </div>
-            <div class="metric-label">粉丝</div>
-          </button>
-          <button class="metric" type="button" :disabled="social.vloggersLoading" @click="openFollowing">
-            <div class="metric-num">
-              <Skeleton v-if="social.vloggersLoading" width="28px" height="18px" />
-              <template v-else>{{ social.followingCount }}</template>
-            </div>
-            <div class="metric-label">关注</div>
-          </button>
-          <button class="metric" type="button" :class="{ active: videoTab === 'works' }" @click="openWorksVideos">
-            <div class="metric-num">
-              <Skeleton v-if="myVideos.loading" width="28px" height="18px" />
-              <template v-else>{{ myVideos.items.length }}</template>
-            </div>
-            <div class="metric-label">作品</div>
-          </button>
-          <div class="metric static">
-            <div class="metric-num">
-              <Skeleton v-if="myVideos.loading" width="36px" height="18px" />
-              <template v-else>{{ totalReceivedLikes }}</template>
-            </div>
-            <div class="metric-label">获赞</div>
-          </div>
-          <div v-if="socialErrorHint" class="subtle" style="margin-left: 8px">社交信息加载失败：{{ socialErrorHint }}</div>
+        <div class="tools">
+          <button class="ghost compact" type="button" @click="router.push('/checkin')">签到</button>
+          <button class="ghost compact" type="button" @click="router.push('/lottery')">抽奖</button>
+          <button class="ghost compact" type="button" @click="goWallet">钱包</button>
+          <button v-if="adminAllowed" class="ghost compact" type="button" @click="goAdmin">管理后台</button>
+          <button class="ghost compact" type="button" @click="goSettings">设置</button>
         </div>
-      </div>
 
-      <div class="card" style="margin-top: 14px">
-        <div class="list-head">
-          <p class="title" style="margin: 0">
-            {{ videoTab === 'works' ? '作品' : videoTab === 'likes' ? '点赞视频' : '历史' }}
-          </p>
-          <div class="list-tabs">
-            <button class="ghost" type="button" :class="{ active: videoTab === 'works' }" @click="openWorksVideos">作品</button>
-            <button class="ghost" type="button" :class="{ active: videoTab === 'likes' }" @click="openLikedVideos">
-              点赞视频
-              <span class="subtle">({{ likedVideoCountText }})</span>
-            </button>
-            <button class="ghost" type="button" :class="{ active: videoTab === 'history' }" @click="openHistory()">历史</button>
-          </div>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" :class="{ active: videoTab === 'works' }" @click="openWorksVideos">
+            作品
+            <span class="tab-count">{{ myVideos.loading ? '…' : myVideos.items.length }}</span>
+          </button>
+          <button type="button" role="tab" :class="{ active: videoTab === 'likes' }" @click="openLikedVideos">
+            点赞视频
+            <span class="tab-count">{{ likedVideoCountText }}</span>
+          </button>
+          <button type="button" role="tab" :class="{ active: videoTab === 'history' }" @click="openHistory()">历史</button>
         </div>
 
         <template v-if="videoTab === 'history'">
-          <div class="row" style="gap: 8px; margin-top: 12px">
-            <button class="ghost" type="button" :class="{ active: historyStatus === 'unfinished' }" @click="openHistory('unfinished')">
+          <div class="filters">
+            <button type="button" :class="{ active: historyStatus === 'unfinished' }" @click="openHistory('unfinished')">
               未看完
             </button>
-            <button class="ghost" type="button" :class="{ active: historyStatus === 'completed' }" @click="openHistory('completed')">
+            <button type="button" :class="{ active: historyStatus === 'completed' }" @click="openHistory('completed')">
               已看完
             </button>
           </div>
@@ -739,70 +725,146 @@ watch(
   background: rgba(var(--fg), 0.1);
 }
 
-.ghost.active {
-  background: rgba(254, 44, 85, 0.14);
-  border-color: rgba(254, 44, 85, 0.55);
+.ghost.compact {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  min-height: 32px;
 }
 
-.metric {
-  border: 1px solid rgba(var(--fg), 0.12);
-  background: rgba(var(--fg), 0.06);
-  border-radius: 16px;
-  padding: 12px 14px;
-  min-width: 120px;
-  cursor: pointer;
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-id {
+  min-width: 0;
   display: grid;
+  gap: 6px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: baseline;
+}
+
+.stat {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  text-align: left;
+  font-size: 13px;
+  color: rgba(var(--fg), 0.55);
+  cursor: pointer;
 }
 
-.metric:hover {
-  background: rgba(var(--fg), 0.1);
+.stat:hover {
+  background: transparent;
+  color: rgba(var(--fg), 0.7);
 }
 
-.metric.active {
-  background: rgba(254, 44, 85, 0.14);
-  border-color: rgba(254, 44, 85, 0.55);
+.stat strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: rgba(var(--fg), 0.92);
 }
 
-.metric.static {
+.stat.static {
   cursor: default;
 }
 
-.list-head {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-}
-
-.list-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
-  flex: 1 1 220px;
-}
-
-.list-tabs .ghost {
-  flex: 0 0 auto;
-}
-
-.metric:disabled {
+.stat:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.metric-num {
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: 0.2px;
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
 }
 
-.metric-label {
-  font-size: 12px;
-  color: rgba(var(--fg), 0.65);
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-top: 16px;
+  border-bottom: 1px solid rgba(var(--fg), 0.08);
+}
+
+.tabs button {
+  border: 0;
+  background: transparent;
+  border-radius: 0;
+  padding: 10px 0;
+  min-height: 0;
+  color: rgba(var(--fg), 0.45);
+  font-weight: 600;
+  cursor: pointer;
+  position: relative;
+}
+
+.tabs button:hover {
+  background: transparent;
+  color: rgba(var(--fg), 0.8);
+}
+
+.tabs button.active {
+  color: rgba(var(--fg), 0.92);
+}
+
+.tabs button.active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #fe2c55;
+  border-radius: 2px;
+}
+
+.tab-count {
+  margin-left: 4px;
+  font-weight: 500;
+  color: rgba(var(--fg), 0.4);
+}
+
+.tabs button.active .tab-count {
+  color: rgba(var(--fg), 0.55);
+}
+
+.filters {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.filters button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-height: 0;
+  color: rgba(var(--fg), 0.45);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.filters button:hover {
+  background: transparent;
+  color: rgba(var(--fg), 0.8);
+}
+
+.filters button.active {
+  color: rgba(var(--fg), 0.9);
+  font-weight: 700;
 }
 
 .hint {

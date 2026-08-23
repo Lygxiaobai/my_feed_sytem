@@ -413,32 +413,31 @@ function startAnother() {
 
 <template>
   <AppShell>
-    <div class="publish-wrap">
-      <div v-if="!auth.isLoggedIn" class="card publish-card">
-        <p class="title" style="margin: 0">发布视频</p>
-        <p class="subtle" style="margin: 10px 0 16px">登录后即可投稿。选择视频后会立刻开始上传，你可以同时填写标题。</p>
-        <RouterLink class="pill" to="/account">去登录</RouterLink>
-      </div>
+    <div v-if="!auth.isLoggedIn" class="card">
+      <p class="title" style="margin: 0">发布视频</p>
+      <p class="subtle" style="margin: 10px 0 16px">登录后即可投稿。选择视频后会立刻开始上传，你可以同时填写标题。</p>
+      <RouterLink class="pill" to="/account">去登录</RouterLink>
+    </div>
 
-      <div v-else-if="phase === 'done' && published" class="card publish-card done-card">
-        <p class="title" style="margin: 0">{{ awaitingReview(published) ? '已提交审核' : '发布成功' }}</p>
-        <p class="done-title">{{ published.title }}</p>
-        <p class="audit-tip">
-          {{
-            awaitingReview(published)
-              ? '审核通过后才会出现在信息流中，你可以先在「我的」里查看'
-              : '已出现在信息流中'
-          }}
-        </p>
-        <div class="row done-actions">
-          <RouterLink class="pill" :to="`/video/${published.id}`">去播放</RouterLink>
-          <button type="button" @click="startAnother">再发一条</button>
-        </div>
+    <div v-else-if="phase === 'done' && published" class="card done-card">
+      <p class="title" style="margin: 0">{{ awaitingReview(published) ? '已提交审核' : '发布成功' }}</p>
+      <p class="done-title">{{ published.title }}</p>
+      <p class="audit-tip">
+        {{
+          awaitingReview(published)
+            ? '审核通过后才会出现在信息流中，你可以先在「我的」里查看'
+            : '已出现在信息流中'
+        }}
+      </p>
+      <div class="row done-actions">
+        <RouterLink class="pill" :to="`/video/${published.id}`">去播放</RouterLink>
+        <button type="button" @click="startAnother">再发一条</button>
       </div>
+    </div>
 
-      <div v-else class="card publish-card">
-        <p class="title" style="margin: 0">发布视频</p>
-        <p class="subtle" style="margin: 8px 0 0">选好视频后会立刻上传，填写标题时不用等。</p>
+    <div v-else class="card">
+      <p class="title" style="margin: 0">发布视频</p>
+      <p class="subtle" style="margin: 8px 0 0">选好视频后会立刻上传，填写标题时不用等。</p>
 
         <input
           ref="videoInput"
@@ -459,9 +458,13 @@ function startAnother() {
             @dragleave="onDragLeave"
             @drop="onDrop"
           >
-            <AppIcon name="plus-box" :size="28" />
-            <span class="dropzone-title">将视频拖到这里，或点击选择</span>
-            <span class="dropzone-hint">支持常见视频格式，最大 {{ maxSizeText }}</span>
+            <span class="drop-cover">
+              <AppIcon name="plus-box" :size="28" />
+            </span>
+            <span class="drop-copy">
+              <span class="dropzone-title">将视频拖到这里，或点击选择</span>
+              <span class="dropzone-hint">支持常见视频格式，最大 {{ maxSizeText }}</span>
+            </span>
           </button>
           <p v-if="fileError" class="file-tip bad">{{ fileError }}</p>
         </div>
@@ -571,22 +574,11 @@ function startAnother() {
             </div>
           </div>
         </div>
-      </div>
     </div>
   </AppShell>
 </template>
 
 <style scoped>
-.publish-wrap {
-  display: grid;
-  justify-items: center;
-}
-
-.publish-card {
-  width: min(980px, 100%);
-  padding: 22px;
-}
-
 .file-native {
   position: absolute;
   width: 1px;
@@ -600,19 +592,22 @@ function startAnother() {
 }
 
 .empty-block {
-  margin-top: 18px;
+  margin-top: 14px;
 }
 
 .dropzone {
   display: grid;
-  justify-items: center;
-  gap: 8px;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 14px;
   width: 100%;
-  min-height: 220px;
-  padding: 28px 16px;
+  min-height: 0;
+  padding: 0;
+  align-items: center;
+  text-align: left;
   border: 1px dashed rgba(var(--fg), 0.22);
-  background: rgba(var(--fg), 0.04);
-  border-radius: 16px;
+  background: var(--panel);
+  border-radius: 12px;
+  overflow: hidden;
   color: rgba(var(--fg), 0.86);
 }
 
@@ -620,6 +615,21 @@ function startAnother() {
 .dropzone.over {
   border-color: rgba(254, 44, 85, 0.55);
   background: rgba(254, 44, 85, 0.08);
+}
+
+.drop-cover {
+  aspect-ratio: 16/9;
+  display: grid;
+  place-items: center;
+  background: rgba(var(--fg), 0.04);
+  color: rgba(var(--fg), 0.45);
+}
+
+.drop-copy {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px 12px 0;
+  justify-items: start;
 }
 
 .dropzone-title {
@@ -893,6 +903,14 @@ function startAnother() {
 }
 
 @media (max-width: 900px) {
+  .dropzone {
+    grid-template-columns: 1fr;
+  }
+
+  .drop-copy {
+    padding: 0 12px 12px;
+  }
+
   .composer {
     grid-template-columns: 1fr;
   }

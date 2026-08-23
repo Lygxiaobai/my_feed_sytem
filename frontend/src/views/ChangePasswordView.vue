@@ -50,44 +50,63 @@ async function submit() {
 
 <template>
   <AppShell>
-    <div v-if="!auth.isLoggedIn" class="grid two">
-      <div class="card">
+    <div class="login-wrap">
+      <div v-if="!auth.isLoggedIn" class="card login-card">
         <p class="title">修改密码</p>
-        <p class="subtle">当前后端要求登录后才能修改密码。</p>
-        <div class="row" style="margin-top: 12px; justify-content: flex-end">
-          <button class="primary" type="button" @click="goLogin">去登录</button>
-        </div>
+        <p class="subtle">登录后再回来填写当前密码和新密码。</p>
+        <button class="primary" type="button" style="margin-top: 12px" @click="goLogin">去登录</button>
       </div>
 
-      <div class="card">
-        <p class="title">提示</p>
-        <p class="muted">登录后再回来提交旧密码和新密码。</p>
-      </div>
-    </div>
-
-    <div v-else class="grid two">
-      <div class="card">
+      <div v-else class="card login-card">
         <p class="title">修改密码</p>
-        <p class="subtle">对应后端 `/account/changePassword`。</p>
+        <p class="subtle">改密后当前登录会失效，需要重新登录。</p>
         <div class="grid" style="margin-top: 12px">
           <div>
-            <label>old_password</label>
+            <label>当前密码</label>
             <input v-model.trim="form.oldPassword" type="password" autocomplete="current-password" />
           </div>
           <div>
-            <label>new_password</label>
-            <input v-model.trim="form.newPassword" type="password" autocomplete="new-password" />
+            <label>新密码</label>
+            <input
+              v-model.trim="form.newPassword"
+              type="password"
+              autocomplete="new-password"
+              @keydown.enter="submit"
+            />
           </div>
-          <div class="row" style="justify-content: flex-end">
-            <button class="primary" type="button" :disabled="busy" @click="submit">提交</button>
-          </div>
+          <button class="primary" type="button" :disabled="busy" @click="submit">保存</button>
         </div>
-      </div>
-
-      <div class="card">
-        <p class="title">提示</p>
-        <p class="muted">改密成功后后端会让旧 token 失效；请在「账号」页重新登录。</p>
+        <button class="linkish" type="button" @click="router.push('/settings')">返回设置</button>
       </div>
     </div>
   </AppShell>
 </template>
+
+<style scoped>
+.login-wrap {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  padding: clamp(56px, 14vh, 160px) 16px 40px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+}
+
+.linkish {
+  margin-top: 14px;
+  border: 0;
+  background: transparent;
+  color: rgba(var(--fg), 0.62);
+  padding: 0;
+  min-height: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.linkish:hover {
+  background: transparent;
+  color: rgba(var(--fg), 0.9);
+}
+</style>

@@ -205,14 +205,11 @@ onUnmounted(() => {
 <template>
   <AppShell>
     <div class="card">
-      <div class="row" style="justify-content: space-between">
-        <p class="title" style="margin: 0">钱包</p>
-        <div class="row" style="gap: 8px">
-          <button class="ghost" type="button" @click="router.push('/invoice')">发票</button>
-          <button class="ghost" type="button" @click="router.push('/checkin')">签到</button>
-          <button class="ghost" type="button" @click="router.push('/lottery')">抽奖</button>
-          <button class="ghost" type="button" @click="router.push('/account')">返回账号</button>
-        </div>
+      <p class="title" style="margin: 0">钱包</p>
+      <div class="tools">
+        <button class="ghost compact" type="button" @click="router.push('/invoice')">发票</button>
+        <button class="ghost compact" type="button" @click="router.push('/checkin')">签到</button>
+        <button class="ghost compact" type="button" @click="router.push('/lottery')">抽奖</button>
       </div>
       <div v-if="orderHint.text" class="hint" :class="orderHint.tone" style="margin-top: 12px">
         <span>{{ orderHint.text }}</span>
@@ -290,6 +287,20 @@ onUnmounted(() => {
   border-radius: 12px;
   padding: 10px 12px;
   cursor: pointer;
+}
+
+.ghost.compact {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  min-height: 32px;
+}
+
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .balance {

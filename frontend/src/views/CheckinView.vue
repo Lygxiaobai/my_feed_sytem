@@ -123,9 +123,9 @@ async function onCheckin() {
 <template>
   <AppShell>
     <div class="card">
-      <div class="row" style="justify-content: space-between">
+      <div class="page-head">
         <p class="title" style="margin: 0">每日签到</p>
-        <button class="ghost" type="button" @click="router.push('/wallet')">钱包</button>
+        <button class="ghost compact" type="button" @click="router.push('/wallet')">钱包</button>
       </div>
       <p class="subtle" style="margin-top: 10px">
         每个北京时间自然日可签到 1 次，随机获得 1–20 积分（大于 10 的概率 5%），15 天后过期。
@@ -173,6 +173,19 @@ async function onCheckin() {
   border-radius: 12px;
   padding: 10px 12px;
   cursor: pointer;
+}
+
+.ghost.compact {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  min-height: 32px;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .month-label {

@@ -1,4 +1,4 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -258,23 +258,55 @@ onMounted(loadProfile)
 
 <template>
   <AppShell>
-    <div class="card">
-      <div class="row" style="justify-content: space-between; align-items: flex-start">
-        <div class="row" style="gap: 12px; align-items: center">
-          <UserAvatar :username="state.user?.username ?? 'User'" :id="state.user?.id ?? userId" :size="64" />
-          <div>
-            <div class="title" style="margin: 0">
-              <Skeleton v-if="state.loading && !state.user" width="120px" height="18px" />
-              <template v-else>{{ state.user?.username ?? '-' }}</template>
-            </div>
+    <div class="card profile-card">
+      <div class="profile-head">
+        <UserAvatar :username="state.user?.username ?? 'User'" :id="state.user?.id ?? userId" :size="56" />
+        <div class="profile-id">
+          <div class="title" style="margin: 0">
+            <Skeleton v-if="state.loading && !state.user" width="120px" height="18px" />
+            <template v-else>{{ state.user?.username ?? '-' }}</template>
           </div>
+          <div class="stats">
+            <button
+              class="stat"
+              type="button"
+              :disabled="!auth.isLoggedIn || state.loading || state.socialLoading"
+              @click="openFollowers"
+            >
+              <strong>
+                <Skeleton v-if="state.loading || (auth.isLoggedIn && state.socialLoading)" width="16px" height="14px" />
+                <template v-else>{{ auth.isLoggedIn ? state.followers.length : '—' }}</template>
+              </strong>
+              粉丝
+            </button>
+            <button
+              class="stat"
+              type="button"
+              :disabled="!auth.isLoggedIn || state.loading || state.socialLoading"
+              @click="openFollowing"
+            >
+              <strong>
+                <Skeleton v-if="state.loading || (auth.isLoggedIn && state.socialLoading)" width="16px" height="14px" />
+                <template v-else>{{ auth.isLoggedIn ? state.vloggers.length : '—' }}</template>
+              </strong>
+              关注
+            </button>
+            <span class="stat static">
+              <strong>
+                <Skeleton v-if="state.loading" width="16px" height="14px" />
+                <template v-else>{{ totalReceivedLikes }}</template>
+              </strong>
+              获赞
+            </span>
+          </div>
+          <div v-if="!auth.isLoggedIn" class="subtle">登录后可查看粉丝/关注列表</div>
+          <div v-else-if="state.socialError" class="subtle">社交信息加载失败：{{ state.socialError }}</div>
         </div>
-
-        <div class="row">
-          <button v-if="isMe" class="ghost" type="button" @click="router.push('/account')">我的账号</button>
+        <div class="profile-actions">
+          <button v-if="isMe" class="ghost compact" type="button" @click="router.push('/account')">我的账号</button>
           <template v-else>
             <button
-              class="ghost"
+              class="ghost compact"
               type="button"
               :disabled="!state.user || state.loading"
               @click="goMessage"
@@ -282,7 +314,7 @@ onMounted(loadProfile)
               发私信
             </button>
             <button
-              class="primary"
+              class="primary compact"
               type="button"
               :disabled="!state.user || state.loading || followBusy || social.isPending(userId)"
               @click="toggleFollow"
@@ -295,57 +327,27 @@ onMounted(loadProfile)
 
       <div v-if="state.error" class="hint bad" style="margin-top: 12px">{{ state.error }}</div>
 
-      <div v-else class="row" style="margin-top: 14px">
-        <button class="metric" type="button" :disabled="!auth.isLoggedIn || state.loading || state.socialLoading" @click="openFollowers">
-          <div class="metric-num">
-            <Skeleton v-if="state.loading || (auth.isLoggedIn && state.socialLoading)" width="28px" height="18px" />
-            <template v-else>{{ auth.isLoggedIn ? state.followers.length : '—' }}</template>
-          </div>
-          <div class="metric-label">粉丝</div>
-        </button>
-        <button class="metric" type="button" :disabled="!auth.isLoggedIn || state.loading || state.socialLoading" @click="openFollowing">
-          <div class="metric-num">
-            <Skeleton v-if="state.loading || (auth.isLoggedIn && state.socialLoading)" width="28px" height="18px" />
-            <template v-else>{{ auth.isLoggedIn ? state.vloggers.length : '—' }}</template>
-          </div>
-          <div class="metric-label">关注</div>
-        </button>
-        <div class="metric static">
-          <div class="metric-num">
-            <Skeleton v-if="state.loading" width="28px" height="18px" />
-            <template v-else>{{ state.videos.length }}</template>
-          </div>
-          <div class="metric-label">作品</div>
+      <template v-else>
+        <div class="tabs">
+          <span class="active">
+            作品
+            <span class="tab-count">{{ state.loading ? '…' : state.videos.length }}</span>
+          </span>
         </div>
-        <div class="metric static">
-          <div class="metric-num">
-            <Skeleton v-if="state.loading" width="36px" height="18px" />
-            <template v-else>{{ totalReceivedLikes }}</template>
-          </div>
-          <div class="metric-label">获赞</div>
+
+        <VideoGridSkeleton v-if="state.loading" style="margin-top: 12px" />
+        <div v-else-if="state.videos.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
+
+        <div v-else class="video-grid" style="margin-top: 12px">
+          <button v-for="v in state.videos" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
+            <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
+            <div class="video-meta">
+              <div class="video-title">{{ v.title }}</div>
+              <div class="video-sub subtle">❤️ {{ v.likes_count }} · 💬 {{ v.comment_count }} · {{ new Date(v.created_at).toLocaleDateString() }}</div>
+            </div>
+          </button>
         </div>
-        <div v-if="!auth.isLoggedIn" class="subtle" style="margin-left: 8px">登录后可查看粉丝/关注列表</div>
-        <div v-else-if="state.socialError" class="subtle" style="margin-left: 8px">社交信息加载失败：{{ state.socialError }}</div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top: 14px">
-      <div class="row" style="justify-content: space-between">
-        <p class="title" style="margin: 0">作品</p>
-      </div>
-
-      <VideoGridSkeleton v-if="state.loading" style="margin-top: 12px" />
-      <div v-else-if="state.videos.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
-
-      <div v-else class="video-grid" style="margin-top: 12px">
-        <button v-for="v in state.videos" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
-          <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
-          <div class="video-meta">
-            <div class="video-title">{{ v.title }}</div>
-            <div class="video-sub subtle">❤️ {{ v.likes_count }} · 💬 {{ v.comment_count }} · {{ new Date(v.created_at).toLocaleDateString() }}</div>
-          </div>
-        </button>
-      </div>
+      </template>
     </div>
 
     <div v-if="drawer.open" class="drawer-backdrop" @click.self="closeDrawer">
@@ -385,40 +387,114 @@ onMounted(loadProfile)
   background: rgba(var(--fg), 0.1);
 }
 
-.metric {
-  border: 1px solid rgba(var(--fg), 0.12);
-  background: rgba(var(--fg), 0.06);
-  border-radius: 16px;
-  padding: 12px 14px;
-  min-width: 120px;
-  cursor: pointer;
-  display: grid;
-  gap: 4px;
-  text-align: left;
+.ghost.compact,
+.primary.compact {
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  min-height: 32px;
 }
 
-.metric.static {
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.profile-id {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 6px;
+}
+
+.profile-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: baseline;
+}
+
+.stat {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  min-height: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: rgba(var(--fg), 0.55);
+  cursor: pointer;
+}
+
+.stat:hover {
+  background: transparent;
+  color: rgba(var(--fg), 0.7);
+}
+
+.stat strong {
+  font-size: 16px;
+  font-weight: 700;
+  color: rgba(var(--fg), 0.92);
+}
+
+.stat.static {
   cursor: default;
 }
 
-.metric:hover {
-  background: rgba(var(--fg), 0.1);
-}
-
-.metric:disabled {
+.stat:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
 
-.metric-num {
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: 0.2px;
+.tabs {
+  display: flex;
+  gap: 20px;
+  margin-top: 16px;
+  border-bottom: 1px solid rgba(var(--fg), 0.08);
 }
 
-.metric-label {
-  font-size: 12px;
-  color: rgba(var(--fg), 0.65);
+.tabs .active {
+  position: relative;
+  padding: 10px 0;
+  font-weight: 600;
+  color: rgba(var(--fg), 0.92);
+}
+
+.tabs .active::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: #fe2c55;
+  border-radius: 2px;
+}
+
+.tab-count {
+  margin-left: 4px;
+  font-weight: 500;
+  color: rgba(var(--fg), 0.55);
+}
+
+@media (max-width: 640px) {
+  .profile-head {
+    flex-wrap: wrap;
+  }
+
+  .profile-actions {
+    width: 100%;
+    padding-left: 70px;
+  }
 }
 
 .hint {
