@@ -1,8 +1,8 @@
 ---
 scenarios:
-  - name: feed-cards-show-stored-tags
+  - name: feed-cards-hide-stored-tags
     description: A viewer watches a recommendation or hot-ranking card for a video that has stored tags.
-    expected: The card shows those tags. A video with no stored tags shows no tag chips and does not invent labels from the title.
+    expected: The playback overlay and list card do not show those tags. A video with no stored tags also shows no tag chips and does not invent labels from the title.
     tags:
       - frontend-e2e
       - desktop

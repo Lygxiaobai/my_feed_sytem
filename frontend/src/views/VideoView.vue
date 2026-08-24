@@ -5,7 +5,6 @@ import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 import { track } from '../analytics/track'
 import AppIcon from '../components/AppIcon.vue'
 import AppShell from '../components/AppShell.vue'
-import VideoTags from '../components/VideoTags.vue'
 import { AbortedError, ApiError, type FormUploadProgress } from '../api/client'
 import * as videoApi from '../api/video'
 import type { Video } from '../api/types'
@@ -561,7 +560,6 @@ async function onSaveDraft() {
     <div v-else-if="phase === 'done' && published" class="card done-card">
       <p class="title" style="margin: 0">{{ awaitingReview(published) ? '已提交审核' : '发布成功' }}</p>
       <p class="done-title">{{ published.title }}</p>
-      <VideoTags :tags="published.tags" />
       <p class="audit-tip">
         {{
           awaitingReview(published)

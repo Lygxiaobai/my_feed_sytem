@@ -16,7 +16,6 @@ import ShareSheet from '../components/ShareSheet.vue'
 import TipSheet from '../components/TipSheet.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import VideoPlayer, { type VideoPlayerHandle } from '../components/VideoPlayer.vue'
-import VideoTags from '../components/VideoTags.vue'
 import { ApiError } from '../api/client'
 import * as commentApi from '../api/comment'
 import * as feedApi from '../api/feed'
@@ -805,7 +804,6 @@ onBeforeUnmount(() => {
               </RouterLink>
               <div class="title">{{ item.title }}</div>
               <div v-if="item.description" class="desc">{{ item.description }}</div>
-              <VideoTags :tags="item.tags" overlay />
             </div>
 
             <div class="actions">

@@ -77,14 +77,14 @@ scenarios:
       - mobile
   - name: video-publish-accepts-tags
     description: A signed-in user adds up to seven tags in the publish composer and publishes.
-    expected: The composer shows a single tag field, refuses an eighth tag, offers inferred chips from the title and description, sends the selected tags with publish, and the completion state shows those tags. If the user selects none, the published video uses the inferred tags.
+    expected: The composer shows a single tag field, refuses an eighth tag, offers inferred chips from the title and description, and sends the selected tags with publish. The completion state, detail page, and feed card do not show those tags. If the user selects none, the published video still stores the inferred tags.
     tags:
       - frontend-e2e
       - desktop
       - mobile
-  - name: video-surfaces-show-stored-tags
+  - name: video-surfaces-hide-stored-tags
     description: A viewer opens a published video that has stored tags.
-    expected: The detail page and feed card show those tags. A video with an empty tag list shows no tag chips.
+    expected: The detail page and feed card do not show those tags. A video with an empty tag list also shows no tag chips.
     tags:
       - frontend-e2e
       - desktop

@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { FeedVideoItem } from '../api/types'
-import VideoTags from './VideoTags.vue'
 
 const props = defineProps<{
   item: FeedVideoItem
@@ -55,9 +54,6 @@ function formatPopularity(value?: number) {
         </div>
       </div>
       <div v-if="item.description" class="muted" style="margin-top: 8px">{{ item.description }}</div>
-      <div style="margin-top: 8px">
-        <VideoTags :tags="item.tags" />
-      </div>
     </div>
   </div>
 </template>

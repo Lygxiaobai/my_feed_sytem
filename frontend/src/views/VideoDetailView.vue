@@ -23,7 +23,6 @@ import ShareSheet from '../components/ShareSheet.vue'
 import TipSheet from '../components/TipSheet.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import VideoPlayer, { type VideoPlayerHandle } from '../components/VideoPlayer.vue'
-import VideoTags from '../components/VideoTags.vue'
 import { ApiError } from '../api/client'
 import * as commentApi from '../api/comment'
 import * as likeApi from '../api/like'
@@ -627,7 +626,6 @@ onBeforeUnmount(() => {
             </RouterLink>
             <div class="title">{{ videoApi.videoDisplayTitle(state.video) }}</div>
             <div v-if="state.video.description" class="desc">{{ state.video.description }}</div>
-            <VideoTags :tags="state.video.tags" overlay />
             <span v-if="isDraftVideo" class="manage-badge">草稿</span>
             <span v-else-if="isUnpublishedVideo" class="manage-badge">不公开</span>
           </div>
