@@ -1,5 +1,10 @@
 ---
 scenarios:
+  - name: feed-cards-include-stored-tags
+    description: A client reads latest, popularity, following, or recommendation pages that contain a video with stored tags.
+    expected: Each matching card includes those tags. A video with an empty tag list omits tag chips rather than inventing labels from the title.
+    tags:
+      - backend-api
   - name: latest-feed-cursor
     description: A client can read the latest feed across two cursor pages without duplicate or missing video IDs.
     expected: Adjacent pages form a stable ordered sequence and the next cursor advances or ends the sequence.
@@ -44,7 +49,7 @@ scenarios:
     tags:
       - backend-api
   - name: recommend-small-creator-quota
-    description: A signed-in viewer requests a 10-item recommendation page while both interest-matching videos and ordinary-author videos exist.
+    description: A signed-in viewer with no stored interest tags requests a 10-item recommendation page while both default-matching videos and ordinary-author videos exist.
     expected: The page contains at least two videos from authors below the recommend small-creator follower threshold, unless that pool is empty.
     tags:
       - backend-api
@@ -73,6 +78,16 @@ scenarios:
       - backend-api
   - name: user-interest-persisted
     description: A signed-in user likes or tips a video that already has an embedding.
-    expected: user_embeddings holds one row for that account and the same model, so a later recommend or push can read the interest vector without replaying the like history.
+    expected: user_embeddings holds one row for that account and the same model, and the account interests field holds a tag taken from that video's stored tags.
+    tags:
+      - backend-api
+  - name: recommend-uses-stored-tags
+    description: A signed-in viewer has a stored interest tag and both matching and non-matching approved videos exist.
+    expected: The first page prefers videos whose stored tags match the interest tag, then fills remaining slots from the default mix so the page reaches ten items when inventory allows.
+    tags:
+      - backend-api
+  - name: recommend-default-without-tags
+    description: A signed-in viewer has an empty or NULL interests field.
+    expected: The page uses the default mix rather than returning empty or an internal error, and still excludes unapproved videos.
     tags:
       - backend-api

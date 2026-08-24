@@ -48,6 +48,13 @@ scenarios:
     tags:
       - frontend-e2e
       - desktop
+  - name: account-works-privacy-filters
+    description: A signed-in author opens the works tab on the account hub, then switches to private works and drafts.
+    expected: Public works, unpublished works, and drafts sit in separate pills under 作品. Cards have no more, unpublish, or delete control. An unpublished work appears only under 私密作品.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
   - name: account-history-entry
     description: A signed-in user opens browsing history from the account hub.
     expected: The works card tabs are 作品, 点赞视频, and 历史. Unfinished and completed lists are separate, unfinished cards show resume progress, and a completed card does not offer a leftover seek position.

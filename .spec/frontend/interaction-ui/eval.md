@@ -57,6 +57,13 @@ scenarios:
     tags:
       - frontend-e2e
       - desktop
+  - name: share-sheet-has-no-author-manage
+    description: The author of a video opens share on the detail page.
+    expected: The share sheet only offers copy-code and copy-link. It has no unpublish, relist, or delete controls.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
   - name: reporting-sets-expectations-and-is-not-offered-on-own-content
     description: A viewer reports another user's video, submits the catch-all reason without an explanation, then reports the same video again; the author checks their own video.
     expected: The catch-all reason cannot be submitted without an explanation, a successful submission says a person will review it and that the content is not removed immediately, the repeat submission is refused as already reported, the video stays visible throughout, and the author is offered no report control on their own video.

@@ -8,16 +8,21 @@ import (
 	"unicode/utf8"
 
 	"my_feed_system/internal/account"
+	"my_feed_system/internal/invoice"
+	"my_feed_system/internal/recommend"
 	"my_feed_system/internal/report"
 	"my_feed_system/internal/video"
+	"my_feed_system/internal/wallet"
 )
 
 var (
-	ErrNotReviewer     = errors.New("account is not a reviewer")
-	ErrNoteRequired    = errors.New("takedown note is required")
-	ErrNoteTooLong     = errors.New("takedown note is too long")
-	ErrLookupMissing   = errors.New("lookup identifier is required")
-	ErrLookupAmbiguous = errors.New("only one lookup identifier is allowed")
+	ErrNotReviewer        = errors.New("account is not a reviewer")
+	ErrNoteRequired       = errors.New("takedown note is required")
+	ErrNoteTooLong        = errors.New("takedown note is too long")
+	ErrLookupMissing      = errors.New("lookup identifier is required")
+	ErrLookupAmbiguous    = errors.New("only one lookup identifier is allowed")
+	ErrInvalidOrderStatus = errors.New("invalid order status")
+	ErrInvalidAuditStatus = errors.New("invalid audit status")
 )
 
 // Service 是管理后台的编排层。
@@ -26,13 +31,20 @@ var (
 // 也不复制处置逻辑：下架走 video，结案走 report，这里只负责把它们按
 // 「先改内容、再关工单」的顺序串起来。
 type Service struct {
-	reports  *report.Service
-	videos   *video.Service
-	accounts *account.Service
+	reports   *report.Service
+	videos    *video.Service
+	accounts  *account.Service
+	invoices  *invoice.Service
+	wallets   *wallet.Service
+	interests *recommend.Service
 }
 
-func NewService(reports *report.Service, videos *video.Service, accounts *account.Service) *Service {
-	return &Service{reports: reports, videos: videos, accounts: accounts}
+func NewService(reports *report.Service, videos *video.Service, accounts *account.Service, invoices *invoice.Service, wallets *wallet.Service) *Service {
+	return &Service{reports: reports, videos: videos, accounts: accounts, invoices: invoices, wallets: wallets}
+}
+
+func (s *Service) SetInterests(interests *recommend.Service) {
+	s.interests = interests
 }
 
 func (s *Service) IsReviewer(accountID uint64) bool {
@@ -51,10 +63,37 @@ func (s *Service) Overview(accountID uint64, username string) (*Overview, error)
 	if err != nil {
 		return nil, err
 	}
+	invoiceSum, err := s.invoices.ReviewSummary()
+	if err != nil {
+		return nil, err
+	}
+	paySum, err := s.wallets.OrderReviewSummary()
+	if err != nil {
+		return nil, err
+	}
+	balanceSum, err := s.wallets.BalanceReviewSummary()
+	if err != nil {
+		return nil, err
+	}
+	videoSum, err := s.videos.ReviewSummary()
+	if err != nil {
+		return nil, err
+	}
+	accountSum, err := s.accounts.ReviewSummary()
+	if err != nil {
+		return nil, err
+	}
 	return &Overview{
 		PendingReports: pending,
 		AccountID:      accountID,
 		Username:       username,
+		IssuedInvoices: invoiceSum.IssuedCount,
+		PaidYuan:       paySum.PaidYuan,
+		PaidOrders:     paySum.PaidCount,
+		PendingOrders:  paySum.PendingCount,
+		AvailableCoins: balanceSum.AvailableCoins,
+		VideoCount:     videoSum.Total,
+		AccountCount:   accountSum.Total,
 	}, nil
 }
 
@@ -160,6 +199,7 @@ func (s *Service) LookupAccount(operatorID uint64, req LookupAccountRequest) (*A
 		Email:         email,
 		FollowerCount: row.FollowerCount,
 		CreatedAt:     row.CreatedAt,
+		InterestTags:  interestTagViews(row.Interests),
 	}, items, nil
 }
 
@@ -170,6 +210,7 @@ func videoView(item *video.Video, pending int64) *VideoView {
 		Username:       item.Username,
 		Title:          item.Title,
 		Description:    item.Description,
+		Tags:           []string(item.Tags),
 		PlayURL:        item.PlayURL,
 		CoverURL:       item.CoverURL,
 		LikesCount:     item.LikesCount,

@@ -38,6 +38,7 @@ type FeedVideo struct {
 	Username     string    `json:"username"`
 	Title        string    `json:"title"`
 	Description  string    `json:"description"`
+	Tags         []string  `json:"tags,omitempty"`
 	PlayURL      string    `json:"play_url"`
 	CoverURL     string    `json:"cover_url"`
 	LikesCount   int64     `json:"likes_count"`

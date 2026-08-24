@@ -34,10 +34,15 @@ type Service struct {
 	outboxRepo  *outbox.Repo
 	notify      *notification.Writer
 	interest    interestInvalidator
+	recorder    interestRecorder
 }
 
 type interestInvalidator interface {
 	InvalidateUser(accountID uint64)
+}
+
+type interestRecorder interface {
+	RecordFromVideo(accountID uint64, tags []string) error
 }
 
 func (s *Service) SetNotifier(n *notification.Writer) {
@@ -46,6 +51,10 @@ func (s *Service) SetNotifier(n *notification.Writer) {
 
 func (s *Service) SetInterestInvalidator(v interestInvalidator) {
 	s.interest = v
+}
+
+func (s *Service) SetInterestRecorder(v interestRecorder) {
+	s.recorder = v
 }
 
 func NewService(db *gorm.DB, popularityService *popularity.Service) *Service {
@@ -78,7 +87,7 @@ func (s *Service) Like(accountID uint64, req LikeRequest) error {
 	if err != nil {
 		return err
 	}
-	if currentVideo == nil {
+	if currentVideo == nil || !currentVideo.IsPubliclyListed() {
 		return video.ErrVideoNotFound
 	}
 
@@ -136,6 +145,7 @@ func (s *Service) Like(accountID uint64, req LikeRequest) error {
 	if s.interest != nil {
 		s.interest.InvalidateUser(accountID)
 	}
+	s.recordInterest(accountID, currentVideo)
 	return nil
 }
 
@@ -220,6 +230,18 @@ func (s *Service) ListLikedVideoIDs(accountID uint64, videoIDs []uint64) ([]uint
 	}
 
 	return s.repo.FindLikedVideoIDs(accountID, videoIDs)
+}
+
+func (s *Service) recordInterest(accountID uint64, item *video.Video) {
+	if s.recorder == nil || item == nil {
+		return
+	}
+	if err := s.recorder.RecordFromVideo(accountID, []string(item.Tags)); err != nil {
+		slog.Warn("record interest tags failed",
+			slog.Uint64("account_id", accountID),
+			slog.Uint64("video_id", item.ID),
+			slog.String("error", err.Error()))
+	}
 }
 
 func (s *Service) invalidateDetailCache(videoID uint64) {

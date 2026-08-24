@@ -30,3 +30,18 @@ scenarios:
     expected: The email lookup returns the public identity, the bound email, follower count, and works including unapproved ones, and never a password. The combined lookup is refused.
     tags:
       - backend-api
+  - name: reviewer-can-list-videos-and-accounts
+    description: A reviewer lists videos and accounts without a single-item lookup, then opens one rejected video and one account that has liked another work.
+    expected: The video list includes approved and rejected rows, does not hide unapproved works, and shows each work's stored tags. The account list includes every seeded account, never a password, and the liking account shows the stored interest tag written from that work. A non-reviewer is refused.
+    tags:
+      - backend-api
+  - name: reviewer-can-read-finance-boards
+    description: A reviewer lists invoices, recharge orders, and spendable balances, then opens one invoice and one account balance.
+    expected: The lists include other accounts' issued receipts, paid and unpaid orders, and remaining coins. Opening an invoice returns the frozen yuan and header. Opening a balance returns spendable coins and remaining lots. Coin totals and order statuses are unchanged.
+    tags:
+      - backend-api
+  - name: ordinary-account-cannot-read-finance
+    description: A signed-in account that is not on the reviewer whitelist asks for the invoice, payment, or balance boards.
+    expected: Each call is refused and no invoice, order, or lot row is returned.
+    tags:
+      - backend-api

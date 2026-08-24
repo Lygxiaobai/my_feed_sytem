@@ -37,7 +37,7 @@ scenarios:
       - backend-api
   - name: tip-cut-and-rules
     description: A viewer tips an approved video ten coins, then immediately tips again, and the author tries to tip that video.
-    expected: The author receives seven, the platform records three, the rapid second tip is rejected, and self-tip is rejected.
+    expected: The author receives seven, the platform records three, the rapid second tip is rejected, and self-tip is rejected. The tipper's stored interest tags include a tag from that video.
     tags:
       - backend-api
   - name: recharge-credit-once

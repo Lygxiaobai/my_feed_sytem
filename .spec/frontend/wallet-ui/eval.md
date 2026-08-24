@@ -18,6 +18,13 @@ scenarios:
     tags:
       - frontend-e2e
       - desktop
+  - name: feed-tip-custom-coins
+    description: A signed-in viewer opens the tip sheet and types a custom amount whose first digit is below 10, such as 15 or 50.
+    expected: The digits stay in the field, the author-receives line follows 70% of that amount, and confirm spends the typed coins rather than the highlighted preset.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
   - name: wallet-checkin-lottery
     description: A signed-in user opens the check-in and lottery pages from the account hub or wallet.
     expected: Check-in shows this month's Monday–Sunday calendar with claimed-day coins, claims 1–20 coins once per Beijing day, and then shows today's prize. Lottery shows the six published tiers with the draw control in the hub, spins to the server prize_index after a successful draw, and does not spin when already claimed.

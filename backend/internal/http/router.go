@@ -396,7 +396,8 @@ func NewRouterWithLocalCaches(
 		Window:   time.Minute,
 		FailOpen: true,
 	})
-	adminHandler := admin.NewHandler(admin.NewService(reportService, videoService, accountService))
+	adminService := admin.NewService(reportService, videoService, accountService, invoiceService, walletService)
+	adminHandler := admin.NewHandler(adminService)
 	adminGroup := r.Group("/admin")
 	adminGroup.Use(jwtmiddleware.JWTAuthWithTokenCache(db, tokenCache, jwtSecret))
 	adminHandler.RegisterProtectedRoutes(adminGroup, []gin.HandlerFunc{adminReadLimit}, []gin.HandlerFunc{adminWriteLimit})
@@ -416,7 +417,10 @@ func NewRouterWithLocalCaches(
 	likeService := like.NewServiceWithCachesAndPublisher(db, popularityService, detailCache, localDetailCache, publisher)
 	likeService.SetNotifier(notifyWriter)
 	likeService.SetInterestInvalidator(recommendService)
+	likeService.SetInterestRecorder(accountService)
 	walletService.SetInterestInvalidator(recommendService)
+	walletService.SetInterestRecorder(accountService)
+	adminService.SetInterests(recommendService)
 	likeHandler := like.NewHandler(likeService)
 	likeGroup := r.Group("/like")
 	likeGroup.Use(jwtmiddleware.JWTAuthWithTokenCache(db, tokenCache, jwtSecret))
@@ -427,6 +431,7 @@ func NewRouterWithLocalCaches(
 
 	commentService := comment.NewServiceWithDetailCacheAndPublisher(db, popularityService, detailCache, publisher)
 	commentService.SetNotifier(notifyWriter)
+	commentService.SetInterestRecorder(accountService)
 	commentHandler := comment.NewHandler(commentService)
 	commentGroup := r.Group("/comment")
 	commentHandler.RegisterRoutes(commentGroup)

@@ -162,9 +162,16 @@ func assignHotRel(cands []candidate) {
 }
 
 func mix(interest, small, hot []candidate, limit int, cfg mixConfig) []candidate {
+	return mixExcluding(interest, small, hot, limit, cfg, nil)
+}
+
+func mixExcluding(interest, small, hot []candidate, limit int, cfg mixConfig, usedSeed map[uint64]struct{}) []candidate {
 	plan := slotPlan(limit, cfg.SlotSmallRatio)
 	picked := make([]candidate, 0, limit)
-	used := make(map[uint64]struct{}, limit)
+	used := make(map[uint64]struct{}, limit+len(usedSeed))
+	for id := range usedSeed {
+		used[id] = struct{}{}
+	}
 
 	take := func(pool []candidate) (candidate, []candidate, bool) {
 		return pickMMR(pool, picked, used, cfg)

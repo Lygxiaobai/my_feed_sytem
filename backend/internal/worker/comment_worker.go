@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"gorm.io/gorm"
 
@@ -21,10 +22,19 @@ type CommentWorker struct {
 	detailCache *video.DetailCache
 	publisher   *mq.Publisher
 	notify      *notification.Writer
+	recorder    interestRecorder
+}
+
+type interestRecorder interface {
+	RecordFromVideo(accountID uint64, tags []string) error
 }
 
 func (w *CommentWorker) SetNotifier(n *notification.Writer) {
 	w.notify = n
+}
+
+func (w *CommentWorker) SetInterestRecorder(v interestRecorder) {
+	w.recorder = v
 }
 
 func NewCommentWorker(db *gorm.DB, publisher *mq.Publisher, detailCache *video.DetailCache) *CommentWorker {
@@ -125,9 +135,26 @@ func (w *CommentWorker) handleCommentCreated(ctx context.Context, event mq.Envel
 			Reason:  mq.EventTypeCommentCreated,
 		})
 		invalidateVideoDetailCache(w.detailCache, w.publisher, payload.VideoID)
+		w.recordInterest(payload.AuthorID, payload.VideoID)
 	}
 
 	return nil
+}
+
+func (w *CommentWorker) recordInterest(accountID, videoID uint64) {
+	if w.recorder == nil || accountID == 0 || videoID == 0 {
+		return
+	}
+	item, err := w.videoRepo.FindByID(videoID)
+	if err != nil || item == nil {
+		return
+	}
+	if err := w.recorder.RecordFromVideo(accountID, []string(item.Tags)); err != nil {
+		slog.Warn("record interest tags failed",
+			slog.Uint64("account_id", accountID),
+			slog.Uint64("video_id", videoID),
+			slog.String("error", err.Error()))
+	}
 }
 
 func (w *CommentWorker) handleCommentDeleted(ctx context.Context, event mq.Envelope) error {

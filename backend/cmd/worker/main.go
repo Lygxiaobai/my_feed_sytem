@@ -13,6 +13,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	"my_feed_system/internal/account"
 	"my_feed_system/internal/audit"
 	"my_feed_system/internal/config"
 	"my_feed_system/internal/db"
@@ -114,6 +115,7 @@ func main() {
 	likeWorker := workerpkg.NewLikeWorker(database, publisher, detailCache)
 	commentWorker := workerpkg.NewCommentWorker(database, publisher, detailCache)
 	commentWorker.SetNotifier(notifyWriter)
+	commentWorker.SetInterestRecorder(account.NewService(database, cfg.JWT.Secret))
 	socialWorker := workerpkg.NewSocialWorkerWithFanout(database, inboxStore, followingCache)
 	socialWorker.SetNotifier(notifyWriter)
 	popularityWorker := workerpkg.NewPopularityWorker(database, popularityService, detailCache)

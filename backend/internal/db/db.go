@@ -105,6 +105,9 @@ func NewMySQL(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	if err := backfillAuditStatus(db); err != nil {
 		return nil, fmt.Errorf("backfill audit status: %w", err)
 	}
+	if err := backfillVideoLifecycle(db); err != nil {
+		return nil, fmt.Errorf("backfill video lifecycle: %w", err)
+	}
 	if err := syncVideoCounters(db); err != nil {
 		return nil, fmt.Errorf("sync video counters: %w", err)
 	}
@@ -180,6 +183,16 @@ func backfillAuditStatus(db *gorm.DB) error {
 // auditFeatureLaunchedAt 是审核功能上线时间。
 // 早于此时间发布且没有任何审核流水的内容视为历史存量，直接放行。
 var auditFeatureLaunchedAt = time.Date(2026, 8, 10, 0, 0, 0, 0, time.UTC)
+
+// backfillVideoLifecycle 把生命周期列上线前的存量行标成已发布。
+// 新增列默认就是 published，这一步兜住空串或旧驱动没把默认值写进去的情况。
+func backfillVideoLifecycle(db *gorm.DB) error {
+	return db.Exec(`
+		UPDATE videos
+		SET lifecycle = 'published'
+		WHERE lifecycle IS NULL OR lifecycle = ''
+	`).Error
+}
 
 func syncVideoCounters(db *gorm.DB) error {
 	if err := db.Exec(`

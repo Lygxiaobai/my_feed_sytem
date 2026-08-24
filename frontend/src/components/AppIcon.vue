@@ -24,6 +24,7 @@ export type AppIconName =
   | 'gear'
   | 'search'
   | 'play'
+  | 'more'
 
 withDefaults(
   defineProps<{
@@ -166,6 +167,11 @@ withDefaults(
       fill="currentColor"
       d="M8.2 5.1a1 1 0 0 1 1.5-.8l9.2 6.1a1 1 0 0 1 0 1.7l-9.2 6.1a1 1 0 0 1-1.5-.9V5.1Z"
     />
+    <g v-else-if="name === 'more'" fill="currentColor">
+      <circle cx="12" cy="5" r="1.7" />
+      <circle cx="12" cy="12" r="1.7" />
+      <circle cx="12" cy="19" r="1.7" />
+    </g>
   </svg>
 </template>
 

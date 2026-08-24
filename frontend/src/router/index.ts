@@ -13,6 +13,9 @@ import AdminOverviewView from '../views/admin/AdminOverviewView.vue'
 import AdminReportsView from '../views/admin/AdminReportsView.vue'
 import AdminVideosView from '../views/admin/AdminVideosView.vue'
 import AdminUsersView from '../views/admin/AdminUsersView.vue'
+import AdminInvoicesView from '../views/admin/AdminInvoicesView.vue'
+import AdminPaymentsView from '../views/admin/AdminPaymentsView.vue'
+import AdminBalancesView from '../views/admin/AdminBalancesView.vue'
 import AdminOpsView from '../views/admin/AdminOpsView.vue'
 import UserProfileView from '../views/UserProfileView.vue'
 import WalletView from '../views/WalletView.vue'
@@ -54,6 +57,9 @@ const router = createRouter({
         { path: 'reports', name: 'admin-reports', component: AdminReportsView },
         { path: 'videos', name: 'admin-videos', component: AdminVideosView },
         { path: 'users', name: 'admin-users', component: AdminUsersView },
+        { path: 'invoices', name: 'admin-invoices', component: AdminInvoicesView },
+        { path: 'payments', name: 'admin-payments', component: AdminPaymentsView },
+        { path: 'balances', name: 'admin-balances', component: AdminBalancesView },
         { path: 'ops', name: 'admin-ops', component: AdminOpsView },
       ],
     },

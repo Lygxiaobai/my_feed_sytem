@@ -2,10 +2,17 @@
 scenarios:
   - name: video-detail-navigation
     description: A user can open a video from a feed card and return without losing the route context.
-    expected: The detail view shows the selected video or an explicit missing/error state, and back navigation returns to a usable feed.
+    expected: The detail view shows the selected video or an explicit missing/error state. Back navigation returns to the surface that opened the video, such as the account hub or the recommendation feed; it does not always say 返回推荐.
     tags:
       - frontend-e2e
       - desktop
+  - name: video-detail-back-from-account
+    description: A signed-in author opens one of their works from the account hub.
+    expected: The detail back control says 返回账号, not 返回推荐. Following it returns to the account hub, including any works filter that was open.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
   - name: video-detail-resumes-unfinished
     description: A signed-in user reopens a detail page for a video they left unfinished.
     expected: The player seeks to the stored position after metadata is ready, and a completed or near-end video starts from the beginning.
@@ -56,7 +63,42 @@ scenarios:
       - mobile
   - name: video-publish-waits-for-ready
     description: A user clicks publish before upload or processing has finished.
-    expected: The click does not start a second upload. The workflow waits for ready playable URLs, then publishes once using the title and description current at send time.
+    expected: The click does not start a second upload. The workflow waits for ready playable URLs, then publishes once using the title, description, and tags current at send time.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
+  - name: video-publish-offers-inferred-tags
+    description: A signed-in user fills the title and description, including a hashtag in one of them.
+    expected: Suggested `#` chips appear under the tag field from those fields. Clicking a chip adds it to the selected tags. The author can still type a tag. Publishing without a selection stores the inferred tags.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
+  - name: video-publish-accepts-tags
+    description: A signed-in user adds up to seven tags in the publish composer and publishes.
+    expected: The composer shows a single tag field, refuses an eighth tag, offers inferred chips from the title and description, sends the selected tags with publish, and the completion state shows those tags. If the user selects none, the published video uses the inferred tags.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
+  - name: video-surfaces-show-stored-tags
+    description: A viewer opens a published video that has stored tags.
+    expected: The detail page and feed card show those tags. A video with an empty tag list shows no tag chips.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
+  - name: video-draft-saves-ready-media
+    description: A signed-in user finishes processing a video, edits the title, leaves without publishing, then opens drafts under 作品.
+    expected: The video appears under the 草稿 pill with the typed title, not in public works, private works, or any public surface. Opening it returns to the composer with the same media and fields. Publishing from there does not upload the file again.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
+  - name: video-author-unpublish-and-delete
+    description: The author opens more on their own detail page, unpublishes the public video, then deletes it after confirming. Share, the caption overlay, and work cards have no unpublish or delete buttons.
+    expected: Unpublish immediately stops the public player and feed card for others. On the author's studio the work leaves 作品 and appears under 私密作品. Delete asks for confirmation, then the work disappears from every studio list and reopening the detail shows the missing state.
     tags:
       - frontend-e2e
       - desktop

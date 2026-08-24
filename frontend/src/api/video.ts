@@ -15,6 +15,43 @@ export const MAX_VIDEO_BYTES = 256 * 1024 * 1024
 /** 与 videos.title / description 列宽一致，输入框与提交前截断共用。 */
 export const MAX_TITLE_CHARS = 128
 export const MAX_DESCRIPTION_CHARS = 1000
+export const MAX_VIDEO_TAGS = 7
+export const MAX_TAG_CHARS = 32
+
+/** 与后端 tag.Infer 一致：#话题 + 标题/描述里的短词。 */
+const hashTagPattern = /#([^\s#]{1,32})/g
+const leftoverSplitter = /[#\s,，.。;；!！?？、/|]+/
+const maxPhraseChars = 16
+
+export function inferTags(title: string, description: string): string[] {
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (raw: string) => {
+    const label = raw.trim()
+    if (!label) return
+    const key = label.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    out.push([...label].slice(0, MAX_TAG_CHARS).join(''))
+  }
+  hashTagPattern.lastIndex = 0
+  let match: RegExpExecArray | null
+  const combined = `${title} ${description}`
+  while ((match = hashTagPattern.exec(combined)) !== null) {
+    push(match[1] ?? '')
+    if (out.length >= MAX_VIDEO_TAGS) return out
+  }
+  for (const part of [title, description]) {
+    const stripped = part.replace(/#([^\s#]{1,32})/g, ' ')
+    for (const token of stripped.split(leftoverSplitter)) {
+      const label = token.trim()
+      if (!label || [...label].length > maxPhraseChars) continue
+      push(label)
+      if (out.length >= MAX_VIDEO_TAGS) return out
+    }
+  }
+  return out
+}
 
 export function formatFileSize(bytes: number) {
   const mb = bytes / 1024 / 1024
@@ -68,7 +105,14 @@ function normalizeVideo(video: Video): Video {
 }
 
 export async function publishVideo(
-  input: { title: string; description: string; play_url: string; cover_url: string },
+  input: {
+    title: string
+    description: string
+    tags?: string[]
+    play_url: string
+    cover_url: string
+    draft_id?: number
+  },
   options?: { idempotencyKey?: string },
 ) {
   const res = await postJson<BackendVideoEnvelope>('/video/publish', input, {
@@ -77,6 +121,58 @@ export async function publishVideo(
   })
   return normalizeVideo(res.video)
 }
+
+export async function saveDraft(input: {
+  id?: number
+  title: string
+  description: string
+  tags?: string[]
+  play_url: string
+  cover_url: string
+}) {
+  const res = await postJson<BackendVideoEnvelope>('/video/saveDraft', input, { authRequired: true })
+  return normalizeVideo(res.video)
+}
+
+export async function listDrafts() {
+  const res = await postJson<BackendVideosEnvelope>('/video/listDrafts', {}, { authRequired: true })
+  return res.videos.map(normalizeVideo)
+}
+
+export async function unpublishVideo(id: number) {
+  const res = await postJson<BackendVideoEnvelope>('/video/unpublish', { id }, { authRequired: true })
+  return normalizeVideo(res.video)
+}
+
+export async function relistVideo(id: number) {
+  const res = await postJson<BackendVideoEnvelope>('/video/relist', { id }, { authRequired: true })
+  return normalizeVideo(res.video)
+}
+
+export async function deleteVideo(id: number) {
+  await postJson<{ deleted: boolean }>('/video/delete', { id }, { authRequired: true })
+}
+
+export function videoDisplayTitle(video: Pick<Video, 'title'>) {
+  const title = video.title?.trim()
+  return title || '未命名'
+}
+
+export function isDraft(video: Pick<Video, 'lifecycle'>) {
+  return video.lifecycle === 'draft'
+}
+
+export function isUnpublished(video: Pick<Video, 'lifecycle'>) {
+  return video.lifecycle === 'unpublished'
+}
+
+export function authorManageKind(video: Pick<Video, 'lifecycle'>): AuthorManageKind {
+  if (isDraft(video)) return 'draft'
+  if (isUnpublished(video)) return 'unpublished'
+  return 'published'
+}
+
+export type AuthorManageKind = 'draft' | 'unpublished' | 'published'
 
 export type MediaTaskStatus = 'processing' | 'ready' | 'failed'
 

@@ -19,8 +19,11 @@ const pending = ref(0)
 const nav: { to: string; label: string; exact?: boolean }[] = [
   { to: '/admin', label: '概览', exact: true },
   { to: '/admin/reports', label: '举报队列' },
-  { to: '/admin/videos', label: '内容查询' },
-  { to: '/admin/users', label: '用户查询' },
+  { to: '/admin/videos', label: '视频看板' },
+  { to: '/admin/users', label: '用户看板' },
+  { to: '/admin/invoices', label: '发票' },
+  { to: '/admin/payments', label: '支付' },
+  { to: '/admin/balances', label: '余额' },
   { to: '/admin/ops', label: '运维' },
 ]
 

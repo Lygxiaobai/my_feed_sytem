@@ -1,5 +1,12 @@
 ---
 scenarios:
+  - name: feed-cards-show-stored-tags
+    description: A viewer watches a recommendation or hot-ranking card for a video that has stored tags.
+    expected: The card shows those tags. A video with no stored tags shows no tag chips and does not invent labels from the title.
+    tags:
+      - frontend-e2e
+      - desktop
+      - mobile
   - name: feed-mode-navigation
     description: A user can switch between recommendation, likes-count, and following feed modes and load the next page.
     expected: The selected mode, loading state, exclude-id or cursor, and returned cards stay consistent across navigation.

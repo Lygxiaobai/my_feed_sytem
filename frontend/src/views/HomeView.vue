@@ -16,6 +16,7 @@ import ShareSheet from '../components/ShareSheet.vue'
 import TipSheet from '../components/TipSheet.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import VideoPlayer, { type VideoPlayerHandle } from '../components/VideoPlayer.vue'
+import VideoTags from '../components/VideoTags.vue'
 import { ApiError } from '../api/client'
 import * as commentApi from '../api/comment'
 import * as feedApi from '../api/feed'
@@ -150,7 +151,10 @@ async function syncLikedState(items: FeedVideoItem[]) {
 const filteredItems = computed(() => {
   const items = currentState.value.items
   if (!q.value) return items
-  return items.filter((v) => v.title.toLowerCase().includes(q.value) || v.author.username.toLowerCase().includes(q.value))
+  return items.filter((v) => {
+    if (v.title.toLowerCase().includes(q.value) || v.author.username.toLowerCase().includes(q.value)) return true
+    return (v.tags ?? []).some((tag) => tag.toLowerCase().includes(q.value))
+  })
 })
 
 const activeItem = computed(() => filteredItems.value[activeIndex.value] ?? null)
@@ -801,6 +805,7 @@ onBeforeUnmount(() => {
               </RouterLink>
               <div class="title">{{ item.title }}</div>
               <div v-if="item.description" class="desc">{{ item.description }}</div>
+              <VideoTags :tags="item.tags" overlay />
             </div>
 
             <div class="actions">

@@ -51,7 +51,7 @@ func (s *AuditStore) UpdateStatus(tx *gorm.DB, targetID uint64, status audit.Sta
 // ListByStatus 按状态列出视频，供人工复审队列使用。
 // 用 id 游标分页而非 offset，避免审核过程中列表变动导致漏审或重复。
 func (s *AuditStore) ListByStatus(status audit.Status, limit int, offsetID uint64) ([]audit.Target, error) {
-	query := s.db.Model(&Video{}).Where("audit_status = ?", status)
+	query := scopeReviewable(s.db.Model(&Video{}).Where("audit_status = ?", status))
 	if offsetID > 0 {
 		query = query.Where("id > ?", offsetID)
 	}

@@ -13,7 +13,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"my_feed_system/internal/audit"
 	"my_feed_system/internal/config"
 	"my_feed_system/internal/mq"
 	"my_feed_system/internal/notification"
@@ -35,10 +34,15 @@ type Service struct {
 	drawCheckin func() (int, error)
 	notify      *notification.Writer
 	interest    interestInvalidator
+	recorder    interestRecorder
 }
 
 type interestInvalidator interface {
 	InvalidateUser(accountID uint64)
+}
+
+type interestRecorder interface {
+	RecordFromVideo(accountID uint64, tags []string) error
 }
 
 func (s *Service) SetNotifier(n *notification.Writer) {
@@ -47,6 +51,10 @@ func (s *Service) SetNotifier(n *notification.Writer) {
 
 func (s *Service) SetInterestInvalidator(v interestInvalidator) {
 	s.interest = v
+}
+
+func (s *Service) SetInterestRecorder(v interestRecorder) {
+	s.recorder = v
 }
 
 func NewService(db *gorm.DB) *Service {
@@ -197,7 +205,7 @@ func (s *Service) Tip(accountID uint64, username string, req TipRequest) (*TipRe
 	if err != nil {
 		return nil, err
 	}
-	if current == nil || current.AuditStatus != audit.StatusApproved {
+	if current == nil || !current.IsPubliclyListed() {
 		return nil, ErrVideoNotTippable
 	}
 	if current.AuthorID == accountID {
@@ -271,6 +279,14 @@ func (s *Service) Tip(accountID uint64, username string, req TipRequest) (*TipRe
 	}
 	if s.interest != nil {
 		s.interest.InvalidateUser(accountID)
+	}
+	if s.recorder != nil {
+		if err := s.recorder.RecordFromVideo(accountID, []string(current.Tags)); err != nil {
+			slog.Warn("record interest tags failed",
+				slog.Uint64("account_id", accountID),
+				slog.Uint64("video_id", current.ID),
+				slog.String("error", err.Error()))
+		}
 	}
 	return &rec, nil
 }

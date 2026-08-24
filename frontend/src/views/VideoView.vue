@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { onBeforeRouteLeave, RouterLink, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, RouterLink, useRoute, useRouter } from 'vue-router'
 
 import { track } from '../analytics/track'
 import AppIcon from '../components/AppIcon.vue'
 import AppShell from '../components/AppShell.vue'
+import VideoTags from '../components/VideoTags.vue'
 import { AbortedError, ApiError, type FormUploadProgress } from '../api/client'
 import * as videoApi from '../api/video'
 import type { Video } from '../api/types'
@@ -13,6 +14,7 @@ import { useAuthStore } from '../stores/auth'
 import { useToastStore } from '../stores/toast'
 
 const router = useRouter()
+const route = useRoute()
 const auth = useAuthStore()
 const toast = useToastStore()
 
@@ -36,7 +38,9 @@ const publishRequested = ref(false)
 const videoInput = ref<HTMLInputElement | null>(null)
 const previewVideoUrl = ref('')
 const readyTask = ref<VideoUploadTask | null>(null)
+const draftId = ref(0)
 const dragOver = ref(false)
+const savingDraft = ref(false)
 
 let abortController: AbortController | null = null
 let prepareRunId = 0
@@ -51,20 +55,41 @@ const formatFileSize = videoApi.formatFileSize
 const maxSizeText = videoApi.formatFileSize(videoApi.MAX_VIDEO_BYTES)
 const titleMax = videoApi.MAX_TITLE_CHARS
 const descMax = videoApi.MAX_DESCRIPTION_CHARS
+const tagMax = videoApi.MAX_VIDEO_TAGS
+const tagCharMax = videoApi.MAX_TAG_CHARS
+const publishTags = ref<string[]>([])
+const tagDraft = ref('')
+const inferredTags = computed(() =>
+  videoApi.inferTags(publishForm.title, publishForm.description),
+)
+const unusedInferredTags = computed(() =>
+  inferredTags.value.filter(
+    (tag) => !publishTags.value.some((item) => item.toLowerCase() === tag.toLowerCase()),
+  ),
+)
+const tagHint = computed(() => {
+  if (publishTags.value.length > 0) return '点选会填入标签，也可以自己写'
+  if (inferredTags.value.length > 0) return '点选填入标签，也可以自己写。不选则发布时用这些建议'
+  return '填好标题或描述后，这里会出现可点的 #标签'
+})
 
 const locked = computed(() => phase.value === 'publishing' || phase.value === 'done')
 const preparing = computed(() => phase.value === 'uploading' || phase.value === 'processing')
 const canChangeFile = computed(() => !locked.value)
 const canSubmit = computed(() => {
   if (locked.value || !auth.isLoggedIn) return false
-  if (!publishForm.title.trim() || !publishForm.video || fileError.value) return false
-  return true
+  if (!publishForm.title.trim() || fileError.value) return false
+  return !!publishForm.video || !!readyTask.value
+})
+
+const canSaveDraft = computed(() => {
+  if (locked.value || !auth.isLoggedIn || savingDraft.value) return false
+  return !!readyTask.value?.play_url && !!readyTask.value.cover_url
 })
 
 const shouldWarnLeave = computed(() =>
   phase.value === 'uploading' ||
   phase.value === 'processing' ||
-  phase.value === 'ready' ||
   phase.value === 'publishing',
 )
 
@@ -98,6 +123,40 @@ const progressHint = computed(() => {
 
 const progressBarWidth = computed(() => uploadPercent.value)
 
+function compactTag(raw: string) {
+  const label = raw.trim().replace(/^#/, '')
+  if (!label) return ''
+  return [...label].slice(0, tagCharMax).join('')
+}
+
+function addPublishTag(raw = tagDraft.value) {
+  const label = compactTag(raw)
+  tagDraft.value = ''
+  if (!label || locked.value) return
+  const exists = publishTags.value.some((item) => item.toLowerCase() === label.toLowerCase())
+  if (exists) return
+  if (publishTags.value.length >= tagMax) {
+    toast.error(`最多 ${tagMax} 个标签`)
+    return
+  }
+  publishTags.value = [...publishTags.value, label]
+}
+
+function removePublishTag(label: string) {
+  if (locked.value) return
+  publishTags.value = publishTags.value.filter((item) => item !== label)
+}
+
+function onTagKeydown(event: KeyboardEvent) {
+  if (event.key === 'Enter' || event.key === ',') {
+    event.preventDefault()
+    addPublishTag()
+  }
+  if (event.key === 'Backspace' && !tagDraft.value && publishTags.value.length) {
+    removePublishTag(publishTags.value[publishTags.value.length - 1] ?? '')
+  }
+}
+
 const submitLabel = computed(() => {
   if (phase.value === 'publishing') return '发布中'
   if (publishRequested.value && preparing.value) return '处理完成后发布'
@@ -121,7 +180,7 @@ watch(
 )
 
 watch(
-  () => [publishForm.title, publishForm.description, publishForm.video],
+  () => [publishForm.title, publishForm.description, publishForm.video, publishTags.value.join('\n')],
   () => {
     if (phase.value !== 'publishing') publishRequestKey.value = ''
   },
@@ -154,6 +213,7 @@ function onBeforeUnload(event: BeforeUnloadEvent) {
 
 onMounted(() => {
   window.addEventListener('beforeunload', onBeforeUnload)
+  void loadDraftFromQuery()
 })
 
 onUnmounted(() => {
@@ -163,12 +223,17 @@ onUnmounted(() => {
   setPreviewVideo(null)
 })
 
-onBeforeRouteLeave((_to, _from, next) => {
+onBeforeRouteLeave(async (_to, _from, next) => {
+  if (phase.value === 'ready' && readyTask.value?.play_url && readyTask.value.cover_url) {
+    await persistDraft({ silent: true })
+    next()
+    return
+  }
   if (!shouldWarnLeave.value) {
     next()
     return
   }
-  const ok = window.confirm('视频还在处理或尚未发布，离开将取消未完成的上传。确定离开？')
+  const ok = window.confirm('视频还在处理中，离开将取消未完成的上传。确定离开？')
   if (ok) {
     abortInFlight()
     next()
@@ -305,6 +370,9 @@ async function prepareMedia(file: File) {
 
     readyTask.value = ready
     phase.value = 'ready'
+    if (!publishRequested.value) {
+      await persistDraft({ silent: true })
+    }
     if (publishRequested.value) {
       await commitPublish(ready)
     }
@@ -352,11 +420,14 @@ async function commitPublish(task: VideoUploadTask) {
       {
         title,
         description,
+        tags: publishTags.value,
         play_url: task.play_url,
         cover_url: task.cover_url,
+        draft_id: draftId.value || undefined,
       },
       { idempotencyKey: publishRequestKey.value },
     )
+    draftId.value = 0
 
     published.value = res
     track('video_publish', { video_id: res.id })
@@ -400,14 +471,82 @@ function startAnother() {
   abortInFlight()
   prepareRunId += 1
   published.value = null
+  draftId.value = 0
   publishForm.title = ''
   publishForm.description = ''
   publishForm.video = null
+  publishTags.value = []
+  tagDraft.value = ''
   fileError.value = ''
   resetMediaState()
   phase.value = 'idle'
   if (videoInput.value) videoInput.value.value = ''
   setPreviewVideo(null)
+}
+
+function applyDraft(video: Video) {
+  draftId.value = video.id
+  publishForm.title = video.title ?? ''
+  publishForm.description = video.description ?? ''
+  publishTags.value = video.tags ? [...video.tags] : []
+  readyTask.value = {
+    id: video.id,
+    status: 'ready',
+    play_url: video.play_url,
+    cover_url: video.cover_url,
+    content_type: 'video/mp4',
+    created_at: video.created_at,
+    updated_at: video.created_at,
+  }
+  phase.value = 'ready'
+}
+
+async function persistDraft(options?: { silent?: boolean }) {
+  const task = readyTask.value
+  if (!task?.play_url || !task.cover_url || savingDraft.value) return null
+  savingDraft.value = true
+  try {
+    const saved = await videoApi.saveDraft({
+      id: draftId.value || undefined,
+      title: publishForm.title.trim().slice(0, titleMax),
+      description: publishForm.description.trim().slice(0, descMax),
+      tags: publishTags.value,
+      play_url: task.play_url,
+      cover_url: task.cover_url,
+    })
+    draftId.value = saved.id
+    if (!options?.silent) toast.success('已保存到草稿箱')
+    return saved
+  } catch (error) {
+    if (!options?.silent) {
+      toast.error(error instanceof ApiError ? error.message : String(error))
+    }
+    return null
+  } finally {
+    savingDraft.value = false
+  }
+}
+
+async function loadDraftFromQuery() {
+  const raw = route.query.draft
+  const id = Number(Array.isArray(raw) ? raw[0] : raw)
+  if (!Number.isFinite(id) || id <= 0) return
+  try {
+    const video = await videoApi.getDetail(id)
+    if (!videoApi.isDraft(video)) {
+      toast.info('该内容已不是草稿')
+      await router.replace(`/video/${video.id}`)
+      return
+    }
+    applyDraft(video)
+  } catch (error) {
+    toast.error(error instanceof ApiError ? error.message : '草稿不存在')
+  }
+}
+
+async function onSaveDraft() {
+  if (!canSaveDraft.value) return
+  await persistDraft()
 }
 </script>
 
@@ -422,6 +561,7 @@ function startAnother() {
     <div v-else-if="phase === 'done' && published" class="card done-card">
       <p class="title" style="margin: 0">{{ awaitingReview(published) ? '已提交审核' : '发布成功' }}</p>
       <p class="done-title">{{ published.title }}</p>
+      <VideoTags :tags="published.tags" />
       <p class="audit-tip">
         {{
           awaitingReview(published)
@@ -436,8 +576,17 @@ function startAnother() {
     </div>
 
     <div v-else class="card">
-      <p class="title" style="margin: 0">发布视频</p>
-      <p class="subtle" style="margin: 8px 0 0">选好视频后会立刻上传，填写标题时不用等。</p>
+      <div class="composer-head">
+        <p class="title" style="margin: 0">{{ draftId ? '继续编辑草稿' : '发布视频' }}</p>
+        <RouterLink
+          v-if="auth.claims?.account_id"
+          class="draft-link"
+          :to="'/account?works=drafts'"
+        >
+          草稿箱
+        </RouterLink>
+      </div>
+      <p class="subtle" style="margin: 8px 0 0">选好视频后会立刻上传。没发完的会进草稿箱，可以稍后继续。</p>
 
         <input
           ref="videoInput"
@@ -448,7 +597,7 @@ function startAnother() {
           @change="pickVideo"
         />
 
-        <div v-if="!publishForm.video" class="empty-block">
+        <div v-if="!publishForm.video && !readyTask" class="empty-block">
           <button
             class="dropzone"
             :class="{ over: dragOver }"
@@ -480,17 +629,23 @@ function startAnother() {
           <div class="preview-col">
             <div class="preview-card">
               <video
-                v-if="previewVideoUrl"
+                v-if="previewVideoUrl || readyTask?.play_url"
                 class="video"
-                :src="previewVideoUrl"
+                :src="previewVideoUrl || readyTask?.play_url"
                 controls
                 playsinline
                 preload="metadata"
               />
             </div>
             <div class="file-meta">
-              <div class="file-name">{{ publishForm.video.name }}</div>
-              <div class="file-tip">{{ formatFileSize(publishForm.video.size) }}，上限 {{ maxSizeText }}</div>
+              <div class="file-name">{{ publishForm.video?.name || '已保存的视频' }}</div>
+              <div class="file-tip">
+                {{
+                  publishForm.video
+                    ? `${formatFileSize(publishForm.video.size)}，上限 ${maxSizeText}`
+                    : '来自草稿，可直接发布或更换文件'
+                }}
+              </div>
               <div v-if="phaseText" class="status-line" :class="{ bad: phase === 'failed', ok: phase === 'ready' }">
                 {{ phaseText }}
               </div>
@@ -532,6 +687,52 @@ function startAnother() {
               />
             </div>
 
+            <div>
+              <div class="field-head">
+                <label for="publish-tag">标签</label>
+                <span class="count">{{ publishTags.length }} / {{ tagMax }}</span>
+              </div>
+              <div class="tag-editor" :class="{ locked }">
+                <button
+                  v-for="tag in publishTags"
+                  :key="tag"
+                  class="tag-chip"
+                  type="button"
+                  :disabled="locked"
+                  @click="removePublishTag(tag)"
+                >
+                  {{ tag }}
+                  <span aria-hidden="true">×</span>
+                </button>
+                <input
+                  id="publish-tag"
+                  v-model="tagDraft"
+                  class="tag-input"
+                  :disabled="locked || publishTags.length >= tagMax"
+                  :maxlength="tagCharMax"
+                  placeholder="回车添加，最多 7 个"
+                  @keydown="onTagKeydown"
+                  @blur="addPublishTag()"
+                />
+              </div>
+              <div v-if="unusedInferredTags.length" class="tag-suggest">
+                <p class="tag-suggest-label">从标题和描述发现</p>
+                <div class="tag-suggest-list">
+                  <button
+                    v-for="tag in unusedInferredTags"
+                    :key="tag"
+                    class="tag-suggest-chip"
+                    type="button"
+                    :disabled="locked || publishTags.length >= tagMax"
+                    @click="addPublishTag(tag)"
+                  >
+                    #{{ tag }}
+                  </button>
+                </div>
+              </div>
+              <p class="file-tip">{{ tagHint }}</p>
+            </div>
+
             <div
               v-if="showProgress"
               class="progress"
@@ -568,6 +769,9 @@ function startAnother() {
             <p v-else-if="phase === 'ready'" class="file-tip ok">视频已准备好，填写标题后即可发布</p>
 
             <div class="row submit-row">
+              <button class="ghost-btn" type="button" :disabled="!canSaveDraft" @click="onSaveDraft">
+                {{ savingDraft ? '保存中' : draftId ? '更新草稿' : '存草稿' }}
+              </button>
               <button class="primary big-btn" type="button" :disabled="!canSubmit" @click="onPublish">
                 {{ submitLabel }}
               </button>
@@ -593,6 +797,37 @@ function startAnother() {
 
 .empty-block {
   margin-top: 14px;
+}
+
+.composer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.draft-link {
+  font-size: 13px;
+  color: rgba(var(--fg), 0.62);
+  text-decoration: none;
+}
+
+.draft-link:hover {
+  color: rgba(var(--fg), 0.9);
+}
+
+.ghost-btn {
+  border: 1px solid rgba(var(--fg), 0.14);
+  background: var(--fill);
+  color: rgba(var(--fg), 0.86);
+  border-radius: 14px;
+  padding: 12px 16px;
+  cursor: pointer;
+}
+
+.ghost-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .dropzone {
@@ -735,6 +970,81 @@ function startAnother() {
 
 .desc-input {
   min-height: 120px;
+}
+
+.tag-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 48px;
+  padding: 8px;
+  border: 1px solid rgba(var(--fg), 0.12);
+  border-radius: 14px;
+  background: rgba(var(--fg), 0.03);
+}
+
+.tag-editor.locked {
+  opacity: 0.7;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(254, 44, 85, 0.12);
+  color: inherit;
+  font-size: 13px;
+}
+
+.tag-input {
+  flex: 1 1 140px;
+  min-width: 120px;
+  min-height: 32px;
+  padding: 0 6px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 14px;
+}
+
+.tag-input:focus {
+  outline: none;
+}
+
+.tag-suggest {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.tag-suggest-label {
+  margin: 0;
+  color: rgba(var(--fg), 0.45);
+  font-size: 12px;
+}
+
+.tag-suggest-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tag-suggest-chip {
+  min-height: 28px;
+  padding: 2px 10px;
+  border: 1px dashed rgba(254, 44, 85, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+}
+
+.tag-suggest-chip:disabled {
+  opacity: 0.5;
 }
 
 .big-btn {

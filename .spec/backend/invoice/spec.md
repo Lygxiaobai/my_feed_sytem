@@ -9,6 +9,7 @@ related:
   - backend/internal/invoice/rules.go
   - backend/internal/invoice/repo.go
   - backend/internal/invoice/wallet_orders.go
+  - backend/internal/invoice/review.go
   - backend/internal/wallet/service.go
   - backend/internal/http/router.go
 ---
@@ -24,6 +25,6 @@ An application is accepted only for a recharge the caller owns that is already `
 
 The header is personal only. A title of two to eighty visible characters and a reachable email are required. The application becomes `issued` in the same write. A company header is refused. There is no reviewer queue, issue action, or reject action.
 
-Saving a profile stores the default header for later apply. Apply also upserts that profile. Listing eligible orders returns paid recharges that have no issued invoice. A caller may list and read only their own invoices.
+Saving a profile stores the default header for later apply. Apply also upserts that profile. Listing eligible orders returns paid recharges that have no issued invoice. A caller may list and read only their own invoices. A reviewer may list and read any issued invoice through administration; that path is a read and does not issue, reject, or credit coins.
 
 This leaf does not call Stripe Invoices, does not create a Checkout invoice, and does not treat a Stripe receipt URL as a credit signal. The document it issues is a site receipt, not a government-issued VAT invoice.

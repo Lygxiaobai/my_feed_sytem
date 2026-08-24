@@ -34,6 +34,26 @@ onMounted(async () => {
         <div class="metric-num">{{ overview?.pending_reports ?? 0 }}</div>
         <div class="metric-label">待处理举报</div>
       </button>
+      <button class="card metric" type="button" @click="router.push('/admin/videos')">
+        <div class="metric-num">{{ overview?.video_count ?? 0 }}</div>
+        <div class="metric-label">视频</div>
+      </button>
+      <button class="card metric" type="button" @click="router.push('/admin/users')">
+        <div class="metric-num">{{ overview?.account_count ?? 0 }}</div>
+        <div class="metric-label">用户</div>
+      </button>
+      <button class="card metric" type="button" @click="router.push('/admin/invoices')">
+        <div class="metric-num">{{ overview?.issued_invoices ?? 0 }}</div>
+        <div class="metric-label">已开具发票</div>
+      </button>
+      <button class="card metric" type="button" @click="router.push('/admin/payments')">
+        <div class="metric-num">{{ overview?.paid_yuan ?? 0 }}</div>
+        <div class="metric-label">已支付 {{ overview?.paid_orders ?? 0 }} 笔 · 待支付 {{ overview?.pending_orders ?? 0 }}</div>
+      </button>
+      <button class="card metric" type="button" @click="router.push('/admin/balances')">
+        <div class="metric-num">{{ overview?.available_coins ?? 0 }}</div>
+        <div class="metric-label">用户可花积分</div>
+      </button>
       <button class="card metric" type="button" @click="router.push('/admin/ops')">
         <div class="metric-num">运维</div>
         <div class="metric-label">监控与日志</div>
@@ -49,7 +69,7 @@ onMounted(async () => {
 <style scoped>
 .cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   margin-top: 16px;
 }

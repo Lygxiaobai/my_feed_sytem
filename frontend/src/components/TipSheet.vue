@@ -42,12 +42,28 @@ const inbox = reactive({
 })
 
 const open = computed(() => mode.value !== '')
-const selectedCoins = computed(() => {
-  if (custom.value.trim() !== '') {
-    return Number(custom.value)
-  }
-  return selected.value
+
+/**
+ * 不用 type=number + min=10：浏览器会在输入「1」「5」时把值清掉，
+ * 15、50 这种自定义金额永远输不进去。
+ */
+function parseCustomCoins(raw: string) {
+  const text = raw.trim()
+  if (text === '') return null
+  if (!/^[0-9]+$/.test(text)) return null
+  const n = Number(text)
+  if (!Number.isSafeInteger(n)) return null
+  return n
+}
+
+const customCoins = computed(() => parseCustomCoins(custom.value))
+const customError = computed(() => {
+  if (custom.value.trim() === '') return ''
+  if (customCoins.value === null) return '请输入整数积分'
+  if (customCoins.value < 10) return '最少打赏 10 积分'
+  return ''
 })
+const selectedCoins = computed(() => customCoins.value ?? selected.value)
 const authorGets = computed(() => {
   const coins = selectedCoins.value
   if (!Number.isInteger(coins) || coins < 10) return 0
@@ -107,6 +123,11 @@ function pickPreset(coins: number) {
   custom.value = ''
 }
 
+function onCustomInput(event: Event) {
+  const el = event.target as HTMLInputElement
+  custom.value = el.value.replace(/\D/g, '')
+}
+
 function formatTime(raw: string) {
   const d = new Date(raw)
   if (Number.isNaN(d.getTime())) return raw
@@ -114,6 +135,10 @@ function formatTime(raw: string) {
 }
 
 async function confirm() {
+  if (customError.value) {
+    toast.error(customError.value)
+    return
+  }
   const coins = selectedCoins.value
   if (!Number.isInteger(coins) || coins < 10) {
     toast.error('最少打赏 10 积分')
@@ -168,17 +193,22 @@ defineExpose({ openGive, openInbox, close })
               <div class="preset-coin">{{ preset.coins }} 积分</div>
             </button>
           </div>
-          <label class="custom-lab">自定义积分</label>
+          <label class="custom-lab" for="tip-custom">自定义积分</label>
           <input
-            v-model.trim="custom"
+            id="tip-custom"
             class="custom"
-            type="number"
-            min="10"
-            step="1"
+            type="text"
+            inputmode="numeric"
+            autocomplete="off"
             placeholder="最少 10 积分"
+            :value="custom"
+            :disabled="busy"
+            @input="onCustomInput"
+            @keydown.stop
           />
-          <p class="subtle">作者实收 {{ authorGets }} 积分，优先扣除快过期的积分。</p>
-          <button class="primary confirm" type="button" :disabled="busy" @click="confirm">确认打赏</button>
+          <p v-if="customError" class="subtle bad">{{ customError }}</p>
+          <p v-else class="subtle">作者实收 {{ authorGets }} 积分，优先扣除快过期的积分。</p>
+          <button class="primary confirm" type="button" :disabled="busy || !!customError" @click="confirm">确认打赏</button>
         </template>
 
         <template v-else>
@@ -241,6 +271,10 @@ defineExpose({ openGive, openInbox, close })
   margin: 4px 0 0;
   color: rgba(var(--fg), 0.62);
   font-size: 13px;
+}
+
+.subtle.bad {
+  color: rgba(254, 44, 85, 0.92);
 }
 
 .x {

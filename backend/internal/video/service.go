@@ -21,6 +21,7 @@ import (
 	"my_feed_system/internal/observability"
 	"my_feed_system/internal/outbox"
 	"my_feed_system/internal/popularity"
+	"my_feed_system/internal/tag"
 )
 
 var (
@@ -29,6 +30,10 @@ var (
 	ErrIdempotencyKeyTooLong      = errors.New("idempotency key is too long")
 	ErrIdempotencyRequestConflict = errors.New("idempotency key already used with different request")
 	ErrIdempotencyRequestBusy     = errors.New("request with the same idempotency key is still processing")
+	ErrNotDraft                   = errors.New("video is not a draft")
+	ErrDraftLimitReached          = errors.New("draft limit reached")
+	ErrCannotUnpublish            = errors.New("video cannot be unpublished")
+	ErrCannotRelist               = errors.New("video cannot be relisted")
 )
 
 const (
@@ -96,7 +101,8 @@ func (s *Service) Publish(accountID uint64, username string, idemKey string, req
 		return nil, err
 	}
 
-	requestHash, err := buildPublishRequestHash(req.Title, req.Description, playURL, coverURL)
+	tags := tag.ForPublish(req.Tags, req.Title, req.Description)
+	requestHash, err := buildPublishRequestHash(req.Title, req.Description, []string(tags), playURL, coverURL)
 	if err != nil {
 		return nil, fmt.Errorf("build publish request hash: %w", err)
 	}
@@ -140,20 +146,33 @@ func (s *Service) Publish(accountID uint64, username string, idemKey string, req
 		}
 
 		createdNew = true
-		video = &Video{
-			AuthorID:    accountID,
-			Username:    username,
-			Title:       req.Title,
-			Description: req.Description,
-			PlayURL:     playURL,
-			CoverURL:    coverURL,
-			Popularity:  int64(popularity.PublishWeight),
-			// 审核关闭时发布即公开；打开时先待审，仅作者可见。
-			AuditStatus: s.initialAuditStatus(),
-		}
-
-		if err := s.repo.Create(tx, video); err != nil {
+		draft, err := s.findPromotableDraft(tx, accountID, req.DraftID, playURL)
+		if err != nil {
 			return err
+		}
+		if draft != nil {
+			video, err = s.promoteDraft(tx, draft, username, req.Title, req.Description, tags, playURL, coverURL)
+			if err != nil {
+				return err
+			}
+		} else {
+			video = &Video{
+				AuthorID:    accountID,
+				Username:    username,
+				Title:       req.Title,
+				Description: req.Description,
+				Tags:        tags,
+				PlayURL:     playURL,
+				CoverURL:    coverURL,
+				Popularity:  int64(popularity.PublishWeight),
+				// 审核关闭时发布即公开；打开时先待审，仅作者可见。
+				AuditStatus: s.initialAuditStatus(),
+				Lifecycle:   LifecyclePublished,
+			}
+
+			if err := s.repo.Create(tx, video); err != nil {
+				return err
+			}
 		}
 
 		if err := s.enqueueAfterCreate(tx, video); err != nil {
@@ -457,10 +476,10 @@ func (s *Service) ListByAuthorForReview(authorID uint64) ([]Video, error) {
 // 未过审时返回「不存在」而不是「无权限」：后者会泄漏视频确实存在这一事实，
 // 可被用来枚举他人尚未公开的内容。
 func visibleTo(video *Video, viewerID uint64) bool {
-	if video == nil {
+	if video == nil || video.IsDeleted() {
 		return false
 	}
-	if video.AuditStatus.IsPublic() {
+	if video.IsPubliclyListed() {
 		return true
 	}
 	return viewerID != 0 && viewerID == video.AuthorID
@@ -674,15 +693,17 @@ func normalizeIdempotencyKey(raw string) (string, error) {
 	return key, nil
 }
 
-func buildPublishRequestHash(title string, description string, playURL string, coverURL string) (string, error) {
+func buildPublishRequestHash(title string, description string, tags []string, playURL string, coverURL string) (string, error) {
 	payload := struct {
-		Title       string `json:"title"`
-		Description string `json:"description"`
-		PlayURL     string `json:"play_url"`
-		CoverURL    string `json:"cover_url"`
+		Title       string   `json:"title"`
+		Description string   `json:"description"`
+		Tags        []string `json:"tags"`
+		PlayURL     string   `json:"play_url"`
+		CoverURL    string   `json:"cover_url"`
 	}{
 		Title:       title,
 		Description: description,
+		Tags:        tags,
 		PlayURL:     playURL,
 		CoverURL:    coverURL,
 	}

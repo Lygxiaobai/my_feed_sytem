@@ -55,6 +55,16 @@ scenarios:
     expected: Each case returns the same caller-facing verification-failed outcome.
     tags:
       - backend-api
+  - name: interest-null-reads-as-empty
+    description: An account row still has a NULL interests column.
+    expected: Reading that account for recommendation, review, or a later tag append treats it as no tags and does not fail.
+    tags:
+      - backend-api
+  - name: interest-tags-fifo
+    description: An account records eight distinct interest tags from successive video engagements.
+    expected: The stored JSON array keeps the newest seven strings and drops the oldest.
+    tags:
+      - backend-api
   - name: passkey-can-be-revoked
     description: A signed-in user lists passkeys and deletes one of their own, then another account tries to delete it.
     expected: The owner no longer sees the revoked credential; the other account cannot revoke it.

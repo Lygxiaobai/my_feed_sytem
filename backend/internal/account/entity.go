@@ -1,6 +1,10 @@
 package account
 
-import "time"
+import (
+	"time"
+
+	"my_feed_system/internal/tag"
+)
 
 const (
 	ProviderEmail  = "email"
@@ -16,9 +20,12 @@ type Account struct {
 	// FollowerCount 是粉丝数冗余计数，关注流的推拉分级完全依赖它。
 	// 不实时 COUNT social_relations 的原因：那正是要避免的大表聚合，
 	// 而分级判定处在视频发布的写路径上，每次发布都要读一次。
-	FollowerCount int64     `gorm:"not null;default:0" json:"follower_count"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	FollowerCount int64 `gorm:"not null;default:0" json:"follower_count"`
+	// Interests 存 JSON 字符串数组，最多 7 个 tag。不进公开账号响应。
+	// 用 tag.List 是因为存量行是 NULL，扫进 string 会让登录推荐直接 500。
+	Interests tag.List `gorm:"type:text" json:"-"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // Identity 把一种登录方式绑到账号上。同一 provider+subject 只能对应一个账号。

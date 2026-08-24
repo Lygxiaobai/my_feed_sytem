@@ -17,11 +17,13 @@ import CommentAuthor from '../components/CommentAuthor.vue'
 import CommentListSkeleton from '../components/CommentListSkeleton.vue'
 import DanmakuLayer from '../components/DanmakuLayer.vue'
 import FeedStageSkeleton from '../components/FeedStageSkeleton.vue'
+import ManageSheet from '../components/ManageSheet.vue'
 import ReportSheet from '../components/ReportSheet.vue'
 import ShareSheet from '../components/ShareSheet.vue'
 import TipSheet from '../components/TipSheet.vue'
 import UserAvatar from '../components/UserAvatar.vue'
 import VideoPlayer, { type VideoPlayerHandle } from '../components/VideoPlayer.vue'
+import VideoTags from '../components/VideoTags.vue'
 import { ApiError } from '../api/client'
 import * as commentApi from '../api/comment'
 import * as likeApi from '../api/like'
@@ -39,6 +41,35 @@ const social = useSocialStore()
 const toast = useToastStore()
 
 const id = computed(() => Number(route.params.id))
+
+/**
+ * 从哪进详情就回哪。写死「返回推荐」会把账号页点进来的人送去信息流。
+ * Vue Router 把上一页记在 history.state.back；分享直达没有上一页时回推荐。
+ */
+function previousPath() {
+  void route.fullPath
+  const back = window.history.state?.back
+  return typeof back === 'string' ? back : ''
+}
+
+function leaveLabelFor(path: string) {
+  if (path === '/' || path.startsWith('/?')) return '返回推荐'
+  if (path.startsWith('/account')) return '返回账号'
+  if (path.startsWith('/u/')) return '返回主页'
+  if (path.startsWith('/hot')) return '返回热榜'
+  if (path === '/video' || path.startsWith('/video?')) return '返回投稿'
+  return '返回'
+}
+
+const leaveLabel = computed(() => leaveLabelFor(previousPath()))
+
+function goBack() {
+  if (typeof window.history.state?.back === 'string') {
+    router.back()
+    return
+  }
+  void router.push('/')
+}
 
 const state = reactive({
   loading: false,
@@ -231,7 +262,73 @@ async function toggleFollow() {
 }
 
 const isOwnVideo = computed(() => !!state.video && auth.claims?.account_id === state.video.author_id)
-const canTip = computed(() => !!state.video && !isOwnVideo.value && (state.video.audit_status ?? 'approved') === 'approved')
+const isDraftVideo = computed(() => !!state.video && videoApi.isDraft(state.video))
+const isUnpublishedVideo = computed(() => !!state.video && videoApi.isUnpublished(state.video))
+const canTip = computed(
+  () =>
+    !!state.video &&
+    !isOwnVideo.value &&
+    (state.video.audit_status ?? 'approved') === 'approved' &&
+    (state.video.lifecycle ?? 'published') === 'published',
+)
+const manageBusy = ref(false)
+
+async function continueDraft() {
+  if (!state.video) return
+  manageSheet.value?.close()
+  await router.push({ path: '/video', query: { draft: String(state.video.id) } })
+}
+
+async function unpublishOwn() {
+  if (!state.video) return
+  if (!window.confirm(`将「${videoApi.videoDisplayTitle(state.video)}」设为不公开？信息流将不再展示，稍后可再公开。`)) return
+  manageBusy.value = true
+  manageSheet.value?.setBusy(true)
+  try {
+    state.video = await videoApi.unpublishVideo(state.video.id)
+    toast.success('已不公开')
+    manageSheet.value?.close()
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '操作失败')
+  } finally {
+    manageBusy.value = false
+    manageSheet.value?.setBusy(false)
+  }
+}
+
+async function relistOwn() {
+  if (!state.video) return
+  manageBusy.value = true
+  manageSheet.value?.setBusy(true)
+  try {
+    state.video = await videoApi.relistVideo(state.video.id)
+    toast.success('已公开')
+    manageSheet.value?.close()
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '操作失败')
+  } finally {
+    manageBusy.value = false
+    manageSheet.value?.setBusy(false)
+  }
+}
+
+async function deleteOwn() {
+  if (!state.video) return
+  if (!window.confirm(`删除「${videoApi.videoDisplayTitle(state.video)}」？删除后无法从作品或草稿箱找回。`)) return
+  manageBusy.value = true
+  manageSheet.value?.setBusy(true)
+  try {
+    const id = state.video.id
+    await videoApi.deleteVideo(id)
+    toast.success('已删除')
+    manageSheet.value?.close()
+    await router.replace(auth.claims?.account_id ? `/u/${auth.claims.account_id}` : '/')
+  } catch (e) {
+    toast.error(e instanceof ApiError ? e.message : '删除失败')
+    manageBusy.value = false
+    manageSheet.value?.setBusy(false)
+  }
+}
 const tipSheet = ref<InstanceType<typeof TipSheet> | null>(null)
 
 function openTip() {
@@ -248,12 +345,18 @@ function openTips() {
 }
 
 const shareSheet = ref<InstanceType<typeof ShareSheet> | null>(null)
+const manageSheet = ref<InstanceType<typeof ManageSheet> | null>(null)
 const reportSheet = ref<InstanceType<typeof ReportSheet> | null>(null)
 
 function share() {
   if (!state.video) return
   track('video_share', { video_id: state.video.id, from: 'detail' })
   shareSheet.value?.openFor(state.video.id)
+}
+
+function openManage() {
+  if (!state.video) return
+  manageSheet.value?.openFor(videoApi.authorManageKind(state.video), manageBusy.value)
 }
 
 function openReport() {
@@ -486,7 +589,7 @@ onBeforeUnmount(() => {
     <div class="page">
       <div class="top">
         <div class="top-left">
-          <RouterLink class="chip" to="/">← 返回推荐</RouterLink>
+          <button class="chip" type="button" @click="goBack">← {{ leaveLabel }}</button>
         </div>
         <div class="top-right" />
       </div>
@@ -522,8 +625,11 @@ onBeforeUnmount(() => {
               <UserAvatar :username="state.video.username" :id="state.video.author_id" :size="40" />
               <span class="author-name">@{{ state.video.username }}</span>
             </RouterLink>
-            <div class="title">{{ state.video.title }}</div>
+            <div class="title">{{ videoApi.videoDisplayTitle(state.video) }}</div>
             <div v-if="state.video.description" class="desc">{{ state.video.description }}</div>
+            <VideoTags :tags="state.video.tags" overlay />
+            <span v-if="isDraftVideo" class="manage-badge">草稿</span>
+            <span v-else-if="isUnpublishedVideo" class="manage-badge">不公开</span>
           </div>
 
           <div class="actions">
@@ -561,6 +667,13 @@ onBeforeUnmount(() => {
               <span class="count">分享</span>
             </button>
 
+            <button v-if="isOwnVideo" class="act" type="button" @click.stop="openManage">
+              <span class="icon">
+                <AppIcon name="more" :size="26" />
+              </span>
+              <span class="count">更多</span>
+            </button>
+
             <button v-if="canTip" class="act" type="button" :disabled="state.busy" @click.stop="openTip">
               <span class="icon">
                 <AppIcon name="coin" :size="26" />
@@ -592,6 +705,13 @@ onBeforeUnmount(() => {
         :is-author="isOwnVideo"
       />
       <ShareSheet ref="shareSheet" />
+      <ManageSheet
+        ref="manageSheet"
+        @unpublish="unpublishOwn"
+        @relist="relistOwn"
+        @delete="deleteOwn"
+        @continue-draft="continueDraft"
+      />
       <ReportSheet ref="reportSheet" />
 
       <div v-if="drawer.open" class="drawer-backdrop" @click.self="closeDrawer">
@@ -769,6 +889,16 @@ onBeforeUnmount(() => {
   line-height: 1.35;
 }
 
+.manage-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+}
+
 .actions {
   position: absolute;
   right: 16px;
@@ -828,12 +958,14 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   padding: 7px 10px;
+  min-height: 0;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(0, 0, 0, 0.42);
   color: rgba(255, 255, 255, 0.9);
   font-size: 12px;
   text-decoration: none;
+  cursor: pointer;
 }
 
 .chip.primary {

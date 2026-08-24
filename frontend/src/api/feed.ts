@@ -23,6 +23,7 @@ function normalizeFeedVideo(item: BackendFeedVideo): FeedVideoItem {
     },
     title: item.title,
     description: item.description,
+    tags: item.tags ?? [],
     play_url: resolveAssetUrl(item.play_url),
     cover_url: resolveAssetUrl(item.cover_url),
     create_time: Math.floor(new Date(item.created_at).getTime() / 1000),

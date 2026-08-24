@@ -3,16 +3,22 @@ title: video
 status: active
 code:
   - backend/internal/video/service.go
+  - backend/internal/video/lifecycle.go
+  - backend/internal/video/visibility.go
 related:
   - backend/internal/video/handler.go
   - backend/internal/video/repo.go
   - backend/internal/video/entity.go
+  - backend/internal/video/lifecycle.go
+  - backend/internal/video/visibility.go
   - backend/internal/video/detail_cache.go
   - backend/internal/video/detail_cache_payload.go
   - backend/internal/video/local_detail_cache.go
   - backend/internal/video/media_validator.go
   - backend/internal/video/invalidation_consumer.go
   - backend/internal/video/sharecode.go
+  - backend/internal/video/review.go
+  - backend/internal/tag/tag.go
   - backend/internal/media/entity.go
   - backend/internal/media/repo.go
   - backend/internal/media/service.go
@@ -32,7 +38,7 @@ related:
 The video subsystem validates uploads, publishes videos, serves details, exposes author and liked-video views, and issues shareable codes that resolve back to a video. Content review is optional and off by default; when enabled, published content is reviewed before it becomes publicly discoverable.
 
 ## expanded spec
-Video publishing is authenticated and idempotent. Upload and publish are rate-limited by client IP and by account so a single session cannot flood the media worker; public detail and share reads share a separate IP ceiling. A video upload first creates a short-lived session, then accepts independently numbered parts that may arrive in parallel; a media task is created only after every part is stored and concatenated. Starting another session for the same account replaces that account's incomplete sessions that are not already being assembled, so a retry after a dropped transfer is not blocked by the unfinished-session ceiling. The write ceiling counts the session, not each part. A video upload creates an account-owned `processing` media task and returns no playable URL until the Worker has produced a standard MP4 and JPEG poster. Tasks finish as `ready` with `/static/videos/*.mp4` and `/static/covers/*.jpg` URLs or as `failed` with a bounded, user-facing error message that does not include ffmpeg, process, or path diagnostics.
+Video publishing is authenticated and idempotent. A publish request may carry up to seven tags. If the author selected any tags, only those are stored. If the author selected none, inferred tags from the title and description are stored as a fallback: `#话题` tokens first, then short leftover phrases. A long sentence is not treated as a tag. The stored list is a JSON string array in a text column, the same shape as account interests. Existing videos keep an empty list. Upload and publish are rate-limited by client IP and by account so a single session cannot flood the media worker; public detail and share reads share a separate IP ceiling. A video upload first creates a short-lived session, then accepts independently numbered parts that may arrive in parallel; a media task is created only after every part is stored and concatenated. Starting another session for the same account replaces that account's incomplete sessions that are not already being assembled, so a retry after a dropped transfer is not blocked by the unfinished-session ceiling. The write ceiling counts the session, not each part. A video upload creates an account-owned `processing` media task and returns no playable URL until the Worker has produced a standard MP4 and JPEG poster. Tasks finish as `ready` with `/static/videos/*.mp4` and `/static/covers/*.jpg` URLs or as `failed` with a bounded, user-facing error message that does not include ffmpeg, process, or path diagnostics.
 
 The Worker uses ffmpeg to normalize video codec/container and MIME-by-extension, enables MP4 fast start, and generates the poster. A source that is already browser-playable H.264/AAC 4:2:0 is remuxed with fast start instead of being re-encoded; any other readable source is transcoded. When a dedicated upload origin is configured, part bytes are sent there so they do not traverse the site's CDN proxy. That origin may use a non-standard HTTPS port when 80/443 on the origin address are intercepted. Raw source files remain private to the shared upload volume and are not exposed by the static resource surface. Media paths returned by the API remain usable through the static resource surface. Detail reads may use cache but must preserve the persisted video's visible fields. Publishing accepts only ready, playable media.
 
@@ -42,7 +48,11 @@ When review is enabled, publishing does not make content public. A newly publish
 
 Approval — or publish itself when review is disabled — is the single point where content becomes public: the side effects that expose content — entering the global timeline, counting toward popularity, and scheduling a title-and-description embedding for recommendation — happen there and only there, for both machine and human decisions. A failed embedding must not block publication; the video remains public and can still appear in non-interest recommendation queues. Consequently no read path may treat presence in a derived index as evidence of approval; every public query filters on review state, including the one that resolves cached or index-supplied identifiers back into videos. A viewer who is not the author cannot distinguish an unapproved video from one that does not exist. Content awaiting review remains reachable by a human reviewer even if its machine review never arrived, so nothing can be silently stranded outside both the public surface and the review queue.
 
-A rejection tells the author only that the content did not pass. The matched rule, category, or any other decision detail stays internal, because disclosing it lets an author probe the boundary by resubmitting variations. A reviewer may also reject already-public content from the administration surface without a prior report; that path is owned by `admin/spec.md` and still writes the same trail.
+Author intent is a separate field from review state. A video is a draft, published, or unpublished by its author; review still decides whether a published video may appear in public listings. Public surfaces require all three: the author has published it, review has approved it, and it has not been soft-deleted. Drafts never enter review, the global timeline, or popularity. An unfinished compose is persisted as a draft only after playable media exists, reused for the same author and playable URL, and capped per author so abandoned uploads cannot grow without bound. Leaving the composer or explicitly saving writes that draft. Publishing a draft promotes the same row instead of creating a second video, and the publish time becomes the listing time.
+
+The author may unpublish a published video without changing its review conclusion, and may relist it later. Relisting an already-approved video re-enters the public-release path; relisting a pending or rejected video only restores author intent. The author may soft-delete a draft, unpublished, or published video. Soft-deleted rows remain in the database for audit and recovery, disappear from every author and public list, and answer as missing on every read path, including share-code resolution. Non-authors who attempt these writes receive the same missing outcome as a request for an unknown id. A moderation takedown still writes rejected and is not used to express author unpublish.
+
+A rejection tells the author only that the content did not pass. The matched rule, category, or any other decision detail stays internal, because disclosing it lets an author probe the boundary by resubmitting variations. A reviewer may also reject already-public content from the administration surface without a prior report; that path is owned by `admin/spec.md` and still writes the same trail. A reviewer may list videos in every review state through administration. That list must not use the public detail path and must not write an unapproved record into the public detail cache.
 
 The review capability is an interface with one local implementation; substituting or chaining a different provider must not require changes to the state machine, the audit trail, or the read-path filtering.
 

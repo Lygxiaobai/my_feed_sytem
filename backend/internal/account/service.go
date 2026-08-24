@@ -133,6 +133,11 @@ func (s *Service) FindByID(req FindByIDRequest) (*Account, error) {
 	return account, nil
 }
 
+// UsernamesByIDs 给管理面批量补用户名，不带密码或 token。
+func (s *Service) UsernamesByIDs(ids []uint64) (map[uint64]string, error) {
+	return s.repo.FindUsernamesByIDs(ids)
+}
+
 // FindEmailSubject 返回账号绑定的邮箱，未绑定则空字符串。
 func (s *Service) FindEmailSubject(accountID uint64) (string, error) {
 	return s.repo.FindEmailSubject(accountID)

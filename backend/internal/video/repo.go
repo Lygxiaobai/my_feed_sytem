@@ -4,8 +4,6 @@ import (
 	"errors"
 
 	"gorm.io/gorm"
-
-	"my_feed_system/internal/audit"
 )
 
 type Repo struct {
@@ -26,12 +24,14 @@ func (r *Repo) Create(tx *gorm.DB, video *Video) error {
 
 // FindByAuthorID 返回作者的作品列表。
 //
-// viewerID 是当前查看者：作者本人能看到自己各种状态的作品（含待审、被拒），
-// 其他人只能看到已过审的。传 0 表示匿名访问。
+// viewerID 是当前查看者：作者本人能看到自己已发布/已下架/待审/被拒的作品，
+// 看不到草稿和已删除（草稿走 FindDraftsByAuthorID）。其他人只看得到公开在架的。
 func (r *Repo) FindByAuthorID(authorID uint64, viewerID uint64) ([]Video, error) {
 	query := r.db.Where("author_id = ?", authorID)
 	if viewerID != authorID {
-		query = query.Where("audit_status = ?", audit.StatusApproved)
+		query = ScopePublic(query)
+	} else {
+		query = scopeAuthorOwned(query)
 	}
 
 	var videos []Video
@@ -41,6 +41,44 @@ func (r *Repo) FindByAuthorID(authorID uint64, viewerID uint64) ([]Video, error)
 	return videos, nil
 }
 
+func (r *Repo) FindDraftsByAuthorID(authorID uint64) ([]Video, error) {
+	var videos []Video
+	if err := scopeDrafts(r.db.Where("author_id = ?", authorID)).
+		Order("updated_at DESC, id DESC").
+		Find(&videos).Error; err != nil {
+		return nil, err
+	}
+	return videos, nil
+}
+
+func (r *Repo) CountDrafts(authorID uint64) (int64, error) {
+	var n int64
+	err := scopeDrafts(r.db.Model(&Video{}).Where("author_id = ?", authorID)).Count(&n).Error
+	return n, err
+}
+
+func (r *Repo) FindDraftByPlayURL(authorID uint64, playURL string) (*Video, error) {
+	var video Video
+	err := scopeDrafts(r.db.Where("author_id = ? AND play_url = ?", authorID, playURL)).
+		Order("id DESC").
+		First(&video).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &video, nil
+}
+
+func (r *Repo) UpdateFields(tx *gorm.DB, id uint64, fields map[string]any) error {
+	db := r.db
+	if tx != nil {
+		db = tx
+	}
+	return db.Model(&Video{}).Where("id = ?", id).Updates(fields).Error
+}
+
 // FindByAuthorIDAll 返回作者的全部作品，不过滤审核状态。
 // 只给管理面用：公开列表必须继续走 FindByAuthorID 的可见性规则。
 func (r *Repo) FindByAuthorIDAll(authorID uint64, limit int) ([]Video, error) {
@@ -48,7 +86,7 @@ func (r *Repo) FindByAuthorIDAll(authorID uint64, limit int) ([]Video, error) {
 		limit = 50
 	}
 	var videos []Video
-	if err := r.db.Where("author_id = ?", authorID).
+	if err := r.db.Where("author_id = ? AND deleted_at IS NULL", authorID).
 		Order("created_at DESC, id DESC").
 		Limit(limit).
 		Find(&videos).Error; err != nil {
@@ -79,7 +117,7 @@ func (r *Repo) FindLikedByAccountID(accountID uint64) ([]Video, error) {
 		Select("videos.*").
 		Joins("JOIN video_likes ON video_likes.video_id = videos.id").
 		Where("video_likes.account_id = ?", accountID).
-		Where("videos.audit_status = ?", audit.StatusApproved).
+		Scopes(ScopePublic).
 		Order("video_likes.created_at DESC, video_likes.id DESC").
 		Find(&videos).Error; err != nil {
 		return nil, err

@@ -5,15 +5,14 @@ import (
 
 	"gorm.io/gorm"
 
-	"my_feed_system/internal/audit"
 	"my_feed_system/internal/video"
 )
 
 // Repo 负责信息流查询所需的数据库访问。
 //
-// 本文件内所有查询都面向公众，因此**每一个**都必须带上审核过滤。
-// 漏掉任意一处，未过审内容就会从那条路径泄漏出去，
-// 审核体系等于形同虚设——新增查询方法时务必套用 onlyApproved。
+// 本文件内所有查询都面向公众，因此**每一个**都必须带上公开过滤。
+// 漏掉任意一处，未过审、作者下架或已删除的内容就会从那条路径泄漏出去——
+// 新增查询方法时务必套用 onlyApproved（内部走 video.ScopePublic）。
 type Repo struct {
 	db *gorm.DB
 }
@@ -26,7 +25,7 @@ func NewRepo(db *gorm.DB) *Repo {
 // onlyApproved 给查询附加审核过滤。
 // 统一走这个函数而不是各处手写字符串，避免拼错列名或写错状态值。
 func onlyApproved(query *gorm.DB) *gorm.DB {
-	return query.Where("videos.audit_status = ?", audit.StatusApproved)
+	return video.ScopePublic(query)
 }
 
 // ListLatest 使用 created_at + id 作为游标，按最新发布时间分页。

@@ -9,7 +9,6 @@ import (
 
 	"gorm.io/gorm"
 
-	"my_feed_system/internal/audit"
 	"my_feed_system/internal/mq"
 	"my_feed_system/internal/recommend"
 )
@@ -73,7 +72,7 @@ func (w *EmbedWorker) embedVideo(ctx context.Context, videoID uint64) error {
 	if err != nil {
 		return err
 	}
-	if item == nil || item.AuditStatus != audit.StatusApproved {
+	if item == nil || !item.IsPubliclyListed() {
 		return nil
 	}
 	text := recommend.EmbedText(item.Title, item.Description)

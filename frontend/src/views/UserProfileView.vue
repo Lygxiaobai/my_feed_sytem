@@ -40,6 +40,25 @@ const state = reactive({
   socialError: '',
 })
 const followBusy = ref(false)
+const drafts = ref<Video[]>([])
+const draftsLoading = ref(false)
+
+/**
+ * 本人资料页不再把草稿箱做成并列 Tab，而是作品下的药丸。
+ * 投稿页旧链 /u/:id?tab=drafts 仍映射到草稿筛选。
+ */
+type WorkFilter = 'public' | 'private' | 'drafts'
+
+function parseWorkFilter(): WorkFilter {
+  if (!isMe.value) return 'public'
+  const works = String(Array.isArray(route.query.works) ? route.query.works[0] : route.query.works ?? '')
+  const tab = String(Array.isArray(route.query.tab) ? route.query.tab[0] : route.query.tab ?? '')
+  if (works === 'private' || works === 'drafts') return works
+  if (tab === 'drafts' || tab === 'private') return tab
+  return 'public'
+}
+
+const workFilter = computed<WorkFilter>(parseWorkFilter)
 
 const isFollowing = computed(() => (auth.isLoggedIn ? social.isFollowing(userId.value) : false))
 const totalReceivedLikes = computed(() => state.videos.reduce((sum, item) => sum + (item.likes_count ?? 0), 0))
@@ -56,6 +75,7 @@ async function loadProfile() {
     const [u, vids] = await Promise.all([accountApi.findById(userId.value), videoApi.listByAuthorId(userId.value)])
     state.user = u
     state.videos = vids
+    if (isMe.value) await loadDrafts()
   } catch (e) {
     state.error = e instanceof ApiError ? e.message : String(e)
     state.user = null
@@ -219,9 +239,64 @@ async function goUser(item: SocialRelation) {
   await router.push(`/u/${relationUserId(item)}`)
 }
 
-async function goVideo(videoId: number) {
-  await router.push(`/video/${videoId}`)
+async function goVideo(item: Video) {
+  if (videoApi.isDraft(item)) {
+    await router.push({ path: '/video', query: { draft: String(item.id) } })
+    return
+  }
+  await router.push(`/video/${item.id}`)
 }
+
+async function setWorkFilter(next: WorkFilter) {
+  const query = { ...route.query }
+  delete query.tab
+  if (next === 'public') delete query.works
+  else query.works = next
+  await router.replace({ query })
+  if (next === 'drafts') await loadDrafts()
+}
+
+async function loadDrafts() {
+  if (!isMe.value) {
+    drafts.value = []
+    return
+  }
+  draftsLoading.value = true
+  try {
+    drafts.value = await videoApi.listDrafts()
+  } catch {
+    drafts.value = []
+  } finally {
+    draftsLoading.value = false
+  }
+}
+
+function videoBadge(item: Video) {
+  if (item.audit_status === 'pending' || item.audit_status === 'reviewing') return '审核中'
+  if (item.audit_status === 'rejected') return '未过审'
+  return ''
+}
+
+const publicWorks = computed(() =>
+  state.videos.filter((item) => !videoApi.isUnpublished(item) && !videoApi.isDraft(item)),
+)
+const privateWorks = computed(() => state.videos.filter((item) => videoApi.isUnpublished(item)))
+const shownVideos = computed(() => {
+  if (!isMe.value) return publicWorks.value
+  if (workFilter.value === 'drafts') return drafts.value
+  if (workFilter.value === 'private') return privateWorks.value
+  return publicWorks.value
+})
+const listLoading = computed(() => {
+  if (workFilter.value === 'drafts' && isMe.value) return state.loading || draftsLoading.value
+  return state.loading
+})
+const worksEmptyHint = computed(() => {
+  if (!isMe.value) return '暂无作品'
+  if (workFilter.value === 'drafts') return '暂无草稿'
+  if (workFilter.value === 'private') return '没有私密作品'
+  return '暂无作品'
+})
 
 async function goMessage() {
   if (!auth.isLoggedIn) {
@@ -250,8 +325,13 @@ watch(
   () => auth.isLoggedIn,
   async () => {
     await loadSocialCounts()
+    if (isMe.value) await loadDrafts()
   },
 )
+
+watch(workFilter, async (next) => {
+  if (next === 'drafts') await loadDrafts()
+})
 
 onMounted(loadProfile)
 </script>
@@ -329,21 +409,37 @@ onMounted(loadProfile)
 
       <template v-else>
         <div class="tabs">
-          <span class="active">
+          <button class="tab active" type="button">
             作品
-            <span class="tab-count">{{ state.loading ? '…' : state.videos.length }}</span>
-          </span>
+            <span class="tab-count">{{ state.loading ? '…' : publicWorks.length }}</span>
+          </button>
         </div>
 
-        <VideoGridSkeleton v-if="state.loading" style="margin-top: 12px" />
-        <div v-else-if="state.videos.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
+        <div v-if="isMe" class="work-filters">
+          <button type="button" :class="{ active: workFilter === 'public' }" @click="setWorkFilter('public')">
+            作品 {{ state.loading ? '…' : publicWorks.length }}
+          </button>
+          <button type="button" :class="{ active: workFilter === 'private' }" @click="setWorkFilter('private')">
+            私密作品 {{ state.loading ? '…' : privateWorks.length }}
+            <span class="lock" aria-hidden="true">🔒</span>
+          </button>
+          <button type="button" :class="{ active: workFilter === 'drafts' }" @click="setWorkFilter('drafts')">
+            草稿 {{ draftsLoading ? '…' : drafts.length }}
+          </button>
+        </div>
+
+        <VideoGridSkeleton v-if="listLoading" style="margin-top: 12px" />
+        <div v-else-if="shownVideos.length === 0" class="hint" style="margin-top: 12px">{{ worksEmptyHint }}</div>
 
         <div v-else class="video-grid" style="margin-top: 12px">
-          <button v-for="v in state.videos" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
-            <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
+          <button v-for="v in shownVideos" :key="v.id" class="video-card" type="button" @click="goVideo(v)">
+            <img class="video-cover" :src="v.cover_url" :alt="videoApi.videoDisplayTitle(v)" loading="lazy" />
+            <span v-if="isMe && workFilter === 'public' && videoBadge(v)" class="video-badge">{{ videoBadge(v) }}</span>
             <div class="video-meta">
-              <div class="video-title">{{ v.title }}</div>
-              <div class="video-sub subtle">❤️ {{ v.likes_count }} · 💬 {{ v.comment_count }} · {{ new Date(v.created_at).toLocaleDateString() }}</div>
+              <div class="video-title">{{ videoApi.videoDisplayTitle(v) }}</div>
+              <div class="video-sub subtle">
+                ❤️ {{ v.likes_count }} · 💬 {{ v.comment_count }} · {{ new Date(v.created_at).toLocaleDateString() }}
+              </div>
             </div>
           </button>
         </div>
@@ -462,14 +558,27 @@ onMounted(loadProfile)
   border-bottom: 1px solid rgba(var(--fg), 0.08);
 }
 
-.tabs .active {
+.tab {
   position: relative;
+  border: 0;
+  background: transparent;
   padding: 10px 0;
+  min-height: 0;
   font-weight: 600;
+  color: rgba(var(--fg), 0.55);
+  cursor: pointer;
+}
+
+.tab:hover {
+  background: transparent;
+  color: rgba(var(--fg), 0.8);
+}
+
+.tab.active {
   color: rgba(var(--fg), 0.92);
 }
 
-.tabs .active::after {
+.tab.active::after {
   content: '';
   position: absolute;
   left: 0;
@@ -484,6 +593,39 @@ onMounted(loadProfile)
   margin-left: 4px;
   font-weight: 500;
   color: rgba(var(--fg), 0.55);
+}
+
+.work-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.work-filters button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  min-height: 0;
+  font-size: 13px;
+  background: rgba(var(--fg), 0.08);
+  color: rgba(var(--fg), 0.62);
+  cursor: pointer;
+}
+
+.work-filters button:hover {
+  background: rgba(var(--fg), 0.12);
+}
+
+.work-filters button.active {
+  background: rgba(254, 44, 85, 0.14);
+  color: #fe2c55;
+  font-weight: 600;
+}
+
+.work-filters .lock {
+  margin-left: 2px;
+  font-size: 11px;
 }
 
 @media (max-width: 640px) {
@@ -524,17 +666,29 @@ onMounted(loadProfile)
 }
 
 .video-card {
+  position: relative;
   border: 1px solid rgba(var(--fg), 0.12);
   background: rgba(var(--fg), 0.05);
   border-radius: 16px;
   overflow: hidden;
-  cursor: pointer;
   padding: 0;
   text-align: left;
+  cursor: pointer;
 }
 
 .video-card:hover {
   background: rgba(var(--fg), 0.08);
+}
+
+.video-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
 }
 
 .video-cover {

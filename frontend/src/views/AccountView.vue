@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { track } from '../analytics/track'
 import AppShell from '../components/AppShell.vue'
@@ -20,6 +20,7 @@ import { useSocialStore } from '../stores/social'
 import { useToastStore } from '../stores/toast'
 import * as webauthn from '../webauthn'
 
+const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const social = useSocialStore()
@@ -157,6 +158,91 @@ function auditBadge(status?: AuditStatus): { text: string; tone: string } | null
   }
 }
 
+/**
+ * 作品主 Tab 底下再拆公开 / 私密 / 草稿，对齐抖音个人页药丸。
+ * listByAuthorId 对作者含已发布+不公开，不含草稿；草稿单独拉。
+ * 卡片本身不再放管理入口，改可见性只走播放页分享面板。
+ */
+type WorkFilter = 'public' | 'private' | 'drafts'
+
+function parseWorkFilter(value: unknown): WorkFilter {
+  const raw = Array.isArray(value) ? value[0] : value
+  if (raw === 'private' || raw === 'drafts') return raw
+  return 'public'
+}
+
+const workFilter = computed<WorkFilter>(() => parseWorkFilter(route.query.works))
+
+const drafts = reactive({
+  loading: false,
+  error: '',
+  items: [] as Video[],
+})
+let draftsReq = 0
+
+async function loadDrafts() {
+  if (!auth.isLoggedIn) {
+    drafts.items = []
+    drafts.error = ''
+    drafts.loading = false
+    return
+  }
+  if (drafts.loading) return
+
+  const req = ++draftsReq
+  drafts.loading = true
+  drafts.error = ''
+  try {
+    const vids = await videoApi.listDrafts()
+    if (req !== draftsReq) return
+    drafts.items = vids
+  } catch (e) {
+    if (req !== draftsReq) return
+    drafts.error = e instanceof ApiError ? e.message : String(e)
+    drafts.items = []
+  } finally {
+    if (req === draftsReq) drafts.loading = false
+  }
+}
+
+const publicWorks = computed(() =>
+  myVideos.items.filter((item) => !videoApi.isUnpublished(item) && !videoApi.isDraft(item)),
+)
+const privateWorks = computed(() => myVideos.items.filter((item) => videoApi.isUnpublished(item)))
+const shownWorks = computed(() => {
+  if (workFilter.value === 'drafts') return drafts.items
+  if (workFilter.value === 'private') return privateWorks.value
+  return publicWorks.value
+})
+const worksListLoading = computed(() => (workFilter.value === 'drafts' ? drafts.loading : myVideos.loading))
+const worksListError = computed(() => (workFilter.value === 'drafts' ? drafts.error : myVideos.error))
+const worksEmptyHint = computed(() => {
+  if (workFilter.value === 'drafts') return '暂无草稿'
+  if (workFilter.value === 'private') return '没有私密作品'
+  return '暂无作品'
+})
+
+function workBadge(item: Video) {
+  return auditBadge(item.audit_status)
+}
+
+async function setWorkFilter(next: WorkFilter) {
+  videoTab.value = 'works'
+  const query = { ...route.query }
+  if (next === 'public') delete query.works
+  else query.works = next
+  await router.replace({ query })
+  if (next === 'drafts') void loadDrafts()
+}
+
+async function goWork(item: Video) {
+  if (videoApi.isDraft(item)) {
+    await router.push({ path: '/video', query: { draft: String(item.id) } })
+    return
+  }
+  await router.push(`/video/${item.id}`)
+}
+
 function openWorksVideos() {
   videoTab.value = 'works'
   void loadMyVideos()
@@ -226,7 +312,7 @@ async function completePasskeyLogin(sessionId: string, cred: PublicKeyCredential
     track('login')
     toast.success('登录成功')
     await social.refreshMine()
-    await Promise.all([loadMyVideos(), loadLikedVideos(), loadHistory(true)])
+    await Promise.all([loadMyVideos(), loadDrafts(), loadLikedVideos(), loadHistory(true)])
   } finally {
     busy.value = false
   }
@@ -334,7 +420,7 @@ async function onEmailLogin() {
     track('login')
     toast.success(res.created ? '注册并登录成功' : '登录成功')
     await social.refreshMine()
-    await Promise.all([loadMyVideos(), loadLikedVideos(), loadHistory(true)])
+    await Promise.all([loadMyVideos(), loadDrafts(), loadLikedVideos(), loadHistory(true)])
   } catch (e) {
     const msg = e instanceof ApiError ? e.message : String(e)
     toast.error(msg)
@@ -424,6 +510,11 @@ watch(
       myVideos.items = []
       myVideos.error = ''
 
+      draftsReq += 1
+      drafts.loading = false
+      drafts.items = []
+      drafts.error = ''
+
       likedVideos.loading = false
       likedVideos.loaded = false
       likedVideos.items = []
@@ -452,6 +543,7 @@ watch(
   (id) => {
     if (auth.isLoggedIn && id) {
       void loadMyVideos()
+      void loadDrafts()
       void loadLikedVideos()
       void loadAdminAccess()
     } else {
@@ -459,6 +551,16 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => route.query.works,
+  (works) => {
+    if (works === 'drafts' || works === 'private') {
+      videoTab.value = 'works'
+      if (works === 'drafts') void loadDrafts()
+    }
+  },
 )
 </script>
 
@@ -552,7 +654,7 @@ watch(
         <div class="tabs" role="tablist">
           <button type="button" role="tab" :class="{ active: videoTab === 'works' }" @click="openWorksVideos">
             作品
-            <span class="tab-count">{{ myVideos.loading ? '…' : myVideos.items.length }}</span>
+            <span class="tab-count">{{ myVideos.loading ? '…' : publicWorks.length }}</span>
           </button>
           <button type="button" role="tab" :class="{ active: videoTab === 'likes' }" @click="openLikedVideos">
             点赞视频
@@ -605,18 +707,29 @@ watch(
           </button>
         </template>
         <template v-else-if="videoTab === 'works'">
-          <VideoGridSkeleton v-if="myVideos.loading" style="margin-top: 12px" />
-          <div v-else-if="myVideos.error" class="hint bad" style="margin-top: 12px">{{ myVideos.error }}</div>
-          <div v-else-if="myVideos.items.length === 0" class="hint" style="margin-top: 12px">暂无作品</div>
-
+          <div class="work-filters">
+            <button type="button" :class="{ active: workFilter === 'public' }" @click="setWorkFilter('public')">
+              作品 {{ myVideos.loading ? '…' : publicWorks.length }}
+            </button>
+            <button type="button" :class="{ active: workFilter === 'private' }" @click="setWorkFilter('private')">
+              私密作品 {{ myVideos.loading ? '…' : privateWorks.length }}
+              <span class="lock" aria-hidden="true">🔒</span>
+            </button>
+            <button type="button" :class="{ active: workFilter === 'drafts' }" @click="setWorkFilter('drafts')">
+              草稿 {{ drafts.loading ? '…' : drafts.items.length }}
+            </button>
+          </div>
+          <VideoGridSkeleton v-if="worksListLoading" style="margin-top: 12px" />
+          <div v-else-if="worksListError" class="hint bad" style="margin-top: 12px">{{ worksListError }}</div>
+          <div v-else-if="shownWorks.length === 0" class="hint" style="margin-top: 12px">{{ worksEmptyHint }}</div>
           <div v-else class="video-grid" style="margin-top: 12px">
-            <button v-for="v in myVideos.items" :key="v.id" class="video-card" type="button" @click="goVideo(v.id)">
-              <img class="video-cover" :src="v.cover_url" :alt="v.title" loading="lazy" />
-              <span v-if="auditBadge(v.audit_status)" class="audit-badge" :class="auditBadge(v.audit_status)?.tone">
-                {{ auditBadge(v.audit_status)?.text }}
+            <button v-for="v in shownWorks" :key="v.id" class="video-card" type="button" @click="goWork(v)">
+              <img class="video-cover" :src="v.cover_url" :alt="videoApi.videoDisplayTitle(v)" loading="lazy" />
+              <span v-if="workFilter === 'public' && workBadge(v)" class="audit-badge" :class="workBadge(v)?.tone">
+                {{ workBadge(v)?.text }}
               </span>
               <div class="video-meta">
-                <div class="video-title">{{ v.title }}</div>
+                <div class="video-title">{{ videoApi.videoDisplayTitle(v) }}</div>
                 <div class="video-sub subtle">❤️ {{ v.likes_count }} · 💬 {{ v.comment_count }} · {{ new Date(v.created_at).toLocaleDateString() }}</div>
               </div>
             </button>
@@ -867,6 +980,39 @@ watch(
   font-weight: 700;
 }
 
+.work-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.work-filters button {
+  border: 0;
+  border-radius: 999px;
+  padding: 6px 12px;
+  min-height: 0;
+  font-size: 13px;
+  background: rgba(var(--fg), 0.08);
+  color: rgba(var(--fg), 0.62);
+  cursor: pointer;
+}
+
+.work-filters button:hover {
+  background: rgba(var(--fg), 0.12);
+}
+
+.work-filters button.active {
+  background: rgba(254, 44, 85, 0.14);
+  color: #fe2c55;
+  font-weight: 600;
+}
+
+.work-filters .lock {
+  margin-left: 2px;
+  font-size: 11px;
+}
+
 .hint {
   color: rgba(var(--fg), 0.78);
 }
@@ -961,10 +1107,10 @@ watch(
   background: rgba(var(--fg), 0.05);
   border-radius: 16px;
   overflow: hidden;
-  cursor: pointer;
   padding: 0;
   text-align: left;
   position: relative;
+  cursor: pointer;
 }
 
 .cover-wrap {

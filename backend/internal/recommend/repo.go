@@ -3,7 +3,7 @@ package recommend
 import (
 	"errors"
 
-	"my_feed_system/internal/audit"
+	"my_feed_system/internal/account"
 	"my_feed_system/internal/like"
 	"my_feed_system/internal/video"
 	"my_feed_system/internal/wallet"
@@ -44,9 +44,8 @@ func (r *Repo) ListMissingVideoIDs(model string, limit int) ([]uint64, error) {
 		limit = 200
 	}
 	var ids []uint64
-	err := r.db.Model(&video.Video{}).
+	err := video.ScopePublic(r.db.Model(&video.Video{})).
 		Select("videos.id").
-		Where("videos.audit_status = ?", audit.StatusApproved).
 		Where(`NOT EXISTS (
 			SELECT 1 FROM video_embeddings e
 			WHERE e.video_id = videos.id AND e.model = ?
@@ -70,7 +69,7 @@ func (r *Repo) LoadVideo(videoID uint64) (*video.Video, error) {
 }
 
 func (r *Repo) ListApprovedCandidates(exclude map[uint64]struct{}, viewerID uint64) ([]candidate, error) {
-	query := r.db.Model(&video.Video{}).Where("audit_status = ?", audit.StatusApproved)
+	query := video.ScopePublic(r.db.Model(&video.Video{}))
 	if viewerID > 0 {
 		query = query.Where("author_id <> ?", viewerID)
 	}
@@ -133,6 +132,21 @@ func (r *Repo) ListApprovedCandidates(exclude map[uint64]struct{}, viewerID uint
 		out = append(out, c)
 	}
 	return out, nil
+}
+
+func (r *Repo) LoadAccountInterests(accountID uint64) ([]string, error) {
+	if accountID == 0 {
+		return nil, nil
+	}
+	var raw account.Account
+	err := r.db.Select("interests").Where("id = ?", accountID).Take(&raw).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return raw.Interests, nil
 }
 
 func (r *Repo) ListInterestSignals(accountID uint64, limit int) ([]interestSignal, error) {

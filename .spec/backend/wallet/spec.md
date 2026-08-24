@@ -10,6 +10,7 @@ related:
   - backend/internal/wallet/repo.go
   - backend/internal/wallet/stripe.go
   - backend/internal/wallet/expire.go
+  - backend/internal/wallet/review.go
   - backend/internal/account/repo.go
   - backend/internal/account/service.go
 ---
@@ -29,6 +30,8 @@ Stripe webhooks answer with the plain text `ok` or `fail` and do not use the API
 
 Stripe Invoices may be enabled on the Stripe account. Recharge still uses Checkout Sessions only: creating an unpaid order does not create an invoice, and `invoice.paid` or a hosted invoice URL must not credit coins. Site invoices for paid recharge are owned by `invoice/spec.md` and are not a fourth `method` on the unpaid recharge order.
 
-A tip requires at least ten coins, a publicly approved video, and a viewer who is not the author. The same transaction writes a tip notice for the author; that inbox row is owned by `notification/spec.md`. The whole tip fails when the balance is too low. The same viewer cannot tip the same video again within ten seconds. Thirty percent of the tipped coins go to a platform ledger the user cannot see; the author receives the rest after integer truncation toward the author being rounded down. Deleted videos do not refund unspent received tips. Popularity increases by the coins the tipper spent.
+A tip requires at least ten coins, a publicly approved video, and a viewer who is not the author. After the tip commits, the tipper's stored interest tags are updated from that video's stored tags. The same transaction writes a tip notice for the author; that inbox row is owned by `notification/spec.md`. The whole tip fails when the balance is too low. The same viewer cannot tip the same video again within ten seconds. Thirty percent of the tipped coins go to a platform ledger the user cannot see; the author receives the rest after integer truncation toward the author being rounded down. Deleted videos do not refund unspent received tips. Popularity increases by the coins the tipper spent.
 
 Listing tips for a video is authenticated. The author receives every tip on that video. A signed-in non-author receives only rows where `from_account_id` is themselves; if they have never tipped that video the list is empty and is not a 403. Unsigned callers keep the existing authentication requirement.
+
+A reviewer may list recharge orders and spendable balances through administration. Those reads do not credit coins, close an unpaid order, or change a lot. Expired remaining amounts are omitted from the spendable totals and are not written as expiry rows on that path.

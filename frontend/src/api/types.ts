@@ -24,12 +24,16 @@ export type Account = {
 /** 内容审核状态，与后端 audit.Status 一致。 */
 export type AuditStatus = 'pending' | 'reviewing' | 'approved' | 'rejected'
 
+/** 作者侧生命周期，与后端 video.Lifecycle 一致；和审核状态正交。 */
+export type VideoLifecycle = 'draft' | 'published' | 'unpublished'
+
 export type Video = {
   id: number
   author_id: number
   username: string
   title: string
   description?: string
+  tags?: string[]
   play_url: string
   cover_url: string
   created_at: string
@@ -37,6 +41,8 @@ export type Video = {
   comment_count: number
   /** 仅作者本人查看自己的作品时才会看到非 approved 的值。 */
   audit_status?: AuditStatus
+  lifecycle?: VideoLifecycle
+  deleted_at?: string | null
 }
 
 export type CommentReply = {
@@ -88,6 +94,7 @@ export type FeedVideoItem = {
   author: FeedAuthor
   title: string
   description?: string
+  tags?: string[]
   play_url: string
   cover_url: string
   create_time: number
@@ -183,6 +190,7 @@ export type BackendFeedVideo = {
   username: string
   title: string
   description?: string
+  tags?: string[]
   play_url: string
   cover_url: string
   likes_count: number

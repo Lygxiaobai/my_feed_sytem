@@ -16,8 +16,8 @@ const shareUrl = computed(() => (share.value ? buildShareUrl(share.value) : ''))
 
 async function openFor(videoId: number) {
   open.value = true
-  loading.value = true
   share.value = null
+  loading.value = true
   try {
     share.value = await getShareInfo(videoId)
   } catch (e) {
@@ -57,6 +57,7 @@ defineExpose({ openFor, close })
   <Teleport to="body">
     <div v-if="open" class="mask" @click.self="close">
       <div class="sheet" role="dialog" aria-modal="true" aria-label="分享">
+        <div class="grab" />
         <div class="head">
           <div>
             <p class="title">分享</p>
@@ -90,23 +91,33 @@ defineExpose({ openFor, close })
   position: fixed;
   inset: 0;
   z-index: 140;
-  display: grid;
-  place-items: center;
-  padding: 16px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
   background: rgba(0, 0, 0, 0.58);
   backdrop-filter: blur(10px);
 }
 
 .sheet {
-  width: min(420px, 100%);
+  width: min(480px, 100%);
   max-height: min(80vh, 720px);
   overflow: auto;
-  padding: 18px;
-  border-radius: 20px;
+  padding: 10px 18px 20px;
+  border-radius: 20px 20px 0 0;
   border: 1px solid rgba(var(--fg), 0.12);
+  border-bottom: 0;
   background: var(--surface);
   display: grid;
   gap: 12px;
+}
+
+.grab {
+  width: 36px;
+  height: 4px;
+  margin: 4px auto 2px;
+  border-radius: 999px;
+  background: rgba(var(--fg), 0.2);
 }
 
 .head {

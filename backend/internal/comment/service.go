@@ -31,10 +31,19 @@ type Service struct {
 	detailCache *video.DetailCache
 	publisher   *mq.Publisher
 	notify      *notification.Writer
+	recorder    interestRecorder
+}
+
+type interestRecorder interface {
+	RecordFromVideo(accountID uint64, tags []string) error
 }
 
 func (s *Service) SetNotifier(n *notification.Writer) {
 	s.notify = n
+}
+
+func (s *Service) SetInterestRecorder(v interestRecorder) {
+	s.recorder = v
 }
 
 func NewService(db *gorm.DB, popularityService *popularity.Service) *Service {
@@ -91,7 +100,7 @@ func (s *Service) Publish(accountID uint64, username string, req PublishRequest)
 	if err != nil {
 		return nil, err
 	}
-	if currentVideo == nil {
+	if currentVideo == nil || !currentVideo.IsPubliclyListed() {
 		return nil, video.ErrVideoNotFound
 	}
 
@@ -242,8 +251,25 @@ func (s *Service) publishSync(comment *VideoComment, videoAuthorID uint64) (*Vid
 		_ = s.popularity.Record(context.Background(), comment.VideoID, popularity.CommentPublishWeight, time.Now())
 	}
 	s.invalidateDetailCache(comment.VideoID)
+	s.recordInterest(comment.AuthorID, comment.VideoID)
 
 	return comment, nil
+}
+
+func (s *Service) recordInterest(accountID, videoID uint64) {
+	if s.recorder == nil || accountID == 0 || videoID == 0 {
+		return
+	}
+	item, err := s.videoRepo.FindByID(videoID)
+	if err != nil || item == nil {
+		return
+	}
+	if err := s.recorder.RecordFromVideo(accountID, []string(item.Tags)); err != nil {
+		slog.Warn("record interest tags failed",
+			slog.Uint64("account_id", accountID),
+			slog.Uint64("video_id", videoID),
+			slog.String("error", err.Error()))
+	}
 }
 
 func (s *Service) deleteSync(commentID uint64, videoID uint64) error {

@@ -1,5 +1,10 @@
 ---
 scenarios:
+  - name: publish-stores-tags
+    description: An authenticated user publishes a video with author tags and a hashtag in the title, then publishes another with no tags and only a hashtag.
+    expected: The first video stores only the author-selected tags. The second stores inferred tags from the title or description, including `#话题` tokens and short leftover phrases. A long sentence is not stored as a tag.
+    tags:
+      - backend-api
   - name: publish-video
     description: An authenticated user uploads a video, waits for media processing, and publishes one video.
     expected: The upload task reaches ready with a playable MP4 and generated poster before publish; a source that is already browser-playable H.264/AAC is remuxed rather than re-encoded; the file is accepted after an upload session plus independently numbered parts that may arrive in parallel and only creates one media task after all parts are stored; the publish response identifies the video and the operation is not duplicated by a repeated idempotency key.
@@ -87,6 +92,16 @@ scenarios:
   - name: share-code-grants-no-access
     description: A code is issued for a video that is later removed, and a non-author resolves it; separately a non-author requests a code for an unapproved video.
     expected: Both answer as though the content does not exist, and the failure is indistinguishable from an unrecognized code.
+    tags:
+      - backend-api
+  - name: unfinished-compose-becomes-a-draft
+    description: An authenticated user uploads playable media and leaves without publishing, then opens the draft box.
+    expected: One draft exists for that media, it is missing from public listings and from other viewers' author pages, and publishing it later reuses the same video id.
+    tags:
+      - backend-api
+  - name: author-unpublish-and-delete-are-not-moderation
+    description: The author unpublishes an approved video, a stranger requests it, the author relists it, then deletes it.
+    expected: Unpublish hides it from every public surface without writing a rejected review state. Relist makes the approved video public again. Delete answers as missing to the author and to strangers, and the row remains for audit.
     tags:
       - backend-api
   - name: pre-existing-content-survives-the-rollout

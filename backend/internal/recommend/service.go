@@ -78,11 +78,6 @@ func (s *Service) List(ctx context.Context, accountID uint64, req ListRequest) (
 	}
 
 	exclude := normalizeExclude(req.ExcludeIDs)
-	userVec, err := s.userVector(ctx, accountID)
-	if err != nil {
-		return nil, err
-	}
-
 	cands, err := s.repo.ListApprovedCandidates(exclude, accountID)
 	if err != nil {
 		return nil, fmt.Errorf("list recommend candidates: %w", err)
@@ -90,8 +85,12 @@ func (s *Service) List(ctx context.Context, accountID uint64, req ListRequest) (
 	cands = s.filterPlayable(cands)
 	s.attachHotScores(ctx, cands)
 
-	interest, small, hot := splitQueues(cands, userVec, s.cfg)
-	picked := mix(interest, small, hot, int(limit), s.cfg)
+	tags, err := s.repo.LoadAccountInterests(accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	picked, hasMore := s.pickByTagsOrDefault(cands, tags, int(limit))
 
 	used := make(map[uint64]struct{}, len(picked)+len(exclude))
 	for id := range exclude {
@@ -114,8 +113,37 @@ func (s *Service) List(ctx context.Context, accountID uint64, req ListRequest) (
 		Videos:     videos,
 		Scores:     scores,
 		ExcludeIDs: nextExclude,
-		HasMore:    leftoverExists(interest, small, hot, used),
+		HasMore:    hasMore,
 	}, nil
+}
+
+// pickByTagsOrDefault：有兴趣 tag 时先按 tag 取，不够再用默认混排补到一页。
+func (s *Service) pickByTagsOrDefault(cands []candidate, tags []string, limit int) ([]candidate, bool) {
+	if limit <= 0 {
+		return nil, leftoverAny(cands, nil)
+	}
+	used := make(map[uint64]struct{}, limit)
+	var picked []candidate
+	if len(tags) > 0 {
+		tagged := matchInterestTags(cands, tags)
+		take := limit
+		if take > len(tagged) {
+			take = len(tagged)
+		}
+		picked = append(picked, tagged[:take]...)
+		for _, item := range picked {
+			used[item.Video.ID] = struct{}{}
+		}
+	}
+	if len(picked) < limit {
+		interest, small, hot := splitQueues(cands, nil, s.cfg)
+		extra := mixExcluding(interest, small, hot, limit-len(picked), s.cfg, used)
+		for _, item := range extra {
+			picked = append(picked, item)
+			used[item.Video.ID] = struct{}{}
+		}
+	}
+	return picked, leftoverAny(cands, used)
 }
 
 func (s *Service) filterPlayable(cands []candidate) []candidate {

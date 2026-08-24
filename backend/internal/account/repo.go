@@ -51,6 +51,22 @@ func (r *Repo) FindByUsername(username string) (*Account, error) {
 	return &account, nil
 }
 
+// FindUsernamesByIDs 只取公开用户名，不读密码或 token。
+func (r *Repo) FindUsernamesByIDs(ids []uint64) (map[uint64]string, error) {
+	out := make(map[uint64]string, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []Account
+	if err := r.db.Select("id, username").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		out[rows[i].ID] = rows[i].Username
+	}
+	return out, nil
+}
+
 // FindByID 按主键查询账号，未命中时返回 nil。
 func (r *Repo) FindByID(id uint64) (*Account, error) {
 	var account Account

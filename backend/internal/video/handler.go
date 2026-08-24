@@ -43,6 +43,11 @@ func (h *Handler) RegisterProtectedRoutes(rg *gin.RouterGroup, uploadMW []gin.Ha
 	rg.POST("/uploadCover", h.UploadCover)
 	rg.POST("/mediaTaskStatus", h.MediaTaskStatus)
 	rg.POST("/publish", append(append([]gin.HandlerFunc{}, publishMW...), h.Publish)...)
+	rg.POST("/saveDraft", append(append([]gin.HandlerFunc{}, publishMW...), h.SaveDraft)...)
+	rg.POST("/listDrafts", h.ListDrafts)
+	rg.POST("/unpublish", h.Unpublish)
+	rg.POST("/relist", h.Relist)
+	rg.POST("/delete", h.Delete)
 	rg.POST("/listLiked", h.ListLiked)
 }
 
@@ -261,6 +266,99 @@ func (h *Handler) Publish(c *gin.Context) {
 	}
 
 	response.OK(c, gin.H{"video": video})
+}
+
+func (h *Handler) SaveDraft(c *gin.Context) {
+	var req SaveDraftRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
+		return
+	}
+
+	video, err := h.service.SaveDraft(c.GetUint64("account_id"), c.GetString("account_username"), req)
+	if err != nil {
+		h.replyAuthorVideoErr(c, err)
+		return
+	}
+	response.OK(c, gin.H{"video": video})
+}
+
+func (h *Handler) ListDrafts(c *gin.Context) {
+	videos, err := h.service.ListDrafts(c.GetUint64("account_id"))
+	if err != nil {
+		response.Fail(c, http.StatusInternalServerError, response.SystemError, err)
+		return
+	}
+	response.OK(c, gin.H{"videos": videos})
+}
+
+func (h *Handler) Unpublish(c *gin.Context) {
+	var req AuthorVideoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
+		return
+	}
+	video, err := h.service.Unpublish(c.Request.Context(), c.GetUint64("account_id"), req)
+	if err != nil {
+		h.replyAuthorVideoErr(c, err)
+		return
+	}
+	response.OK(c, gin.H{"video": video})
+}
+
+func (h *Handler) Relist(c *gin.Context) {
+	var req AuthorVideoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
+		return
+	}
+	video, err := h.service.Relist(c.Request.Context(), c.GetUint64("account_id"), req)
+	if err != nil {
+		h.replyAuthorVideoErr(c, err)
+		return
+	}
+	response.OK(c, gin.H{"video": video})
+}
+
+func (h *Handler) Delete(c *gin.Context) {
+	var req AuthorVideoRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
+		return
+	}
+	if err := h.service.Delete(c.Request.Context(), c.GetUint64("account_id"), req); err != nil {
+		h.replyAuthorVideoErr(c, err)
+		return
+	}
+	response.OK(c, gin.H{"deleted": true})
+}
+
+func (h *Handler) replyAuthorVideoErr(c *gin.Context, err error) {
+	if errors.Is(err, ErrInvalidPlayURL) || errors.Is(err, ErrInvalidCoverURL) {
+		response.FailTip(c, http.StatusBadRequest, response.ParamFormatError, "视频地址无效，请重新上传", err)
+		return
+	}
+	if errors.Is(err, ErrVideoNotFound) {
+		response.FailTip(c, http.StatusNotFound, response.ResourceNotFound, "视频不存在或已被删除", err)
+		return
+	}
+	if errors.Is(err, ErrNotDraft) {
+		response.FailTip(c, http.StatusBadRequest, response.ParamError, "只能保存或发布草稿", err)
+		return
+	}
+	if errors.Is(err, ErrDraftLimitReached) {
+		response.FailTip(c, http.StatusBadRequest, response.ParamError, "草稿已满，请先清理后再保存", err)
+		return
+	}
+	if errors.Is(err, ErrCannotUnpublish) {
+		response.FailTip(c, http.StatusBadRequest, response.ParamError, "当前状态不能下架", err)
+		return
+	}
+	if errors.Is(err, ErrCannotRelist) {
+		response.FailTip(c, http.StatusBadRequest, response.ParamError, "当前状态不能重新上架", err)
+		return
+	}
+	response.Fail(c, http.StatusInternalServerError, response.SystemError, err)
 }
 
 func (h *Handler) ListByAuthorID(c *gin.Context) {
