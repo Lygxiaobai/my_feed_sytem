@@ -37,6 +37,18 @@ upload:
   dir: ${UPLOAD_DIR:-.run/uploads}
   max_video_bytes: ${MAX_VIDEO_BYTES:-268435456}
 
+# 对象存储（Silo，S3 兼容）。
+# endpoint 是容器网络内地址，public_endpoint 是浏览器直传时实际连接的地址；
+# SigV4 把 Host 算进签名，两者不能混用。public_endpoint 留空则按同源直传。
+storage:
+  endpoint: ${SILO_ENDPOINT:-silo:9000}
+  public_endpoint: ${SILO_PUBLIC_ENDPOINT:-}
+  access_key: ${SILO_ACCESS_KEY}
+  secret_key: ${SILO_SECRET_KEY}
+  use_ssl: false
+  bucket_uploads: ${SILO_BUCKET_UPLOADS:-feed-uploads}
+  bucket_media: ${SILO_BUCKET_MEDIA:-feed-media}
+
 pprof:
   api:
     enabled: ${PPROF_API_ENABLED:-true}

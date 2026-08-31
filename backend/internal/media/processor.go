@@ -6,77 +6,46 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 )
 
 const ffmpegBinary = "ffmpeg"
 
-type Processor struct {
-	uploadDir string
-}
+// 成品在媒体桶里的键，与对外 URL 一一对应：
+// videos/{taskID}.mp4  <->  /static/videos/{taskID}.mp4
+func VideoKey(taskID uint64) string  { return fmt.Sprintf("videos/%d.mp4", taskID) }
+func CoverKey(taskID uint64) string  { return fmt.Sprintf("covers/%d.jpg", taskID) }
+func PlayURL(taskID uint64) string   { return "/static/" + VideoKey(taskID) }
+func PosterURL(taskID uint64) string { return "/static/" + CoverKey(taskID) }
 
-func NewProcessor(uploadDir string) *Processor {
-	return &Processor{uploadDir: uploadDir}
-}
+// Processor 只负责 ffmpeg 这一段：本地文件进，本地文件出。
+// 对象存储的收发由调用方（Worker）处理，转码逻辑不必知道字节从哪来、往哪去。
+type Processor struct{}
 
-// Transcode 将任意 ffmpeg 可读的视频统一输出为浏览器兼容的 MP4 和 JPEG poster。
-func (p *Processor) Transcode(ctx context.Context, task *Task) (string, string, error) {
-	if task == nil || task.ID == 0 || strings.TrimSpace(task.SourcePath) == "" {
-		return "", "", errors.New("invalid media task")
-	}
-	if err := p.validateSourcePath(task.SourcePath); err != nil {
-		return "", "", err
-	}
+func NewProcessor() *Processor { return &Processor{} }
 
-	videoDir := filepath.Join(p.uploadDir, "videos")
-	coverDir := filepath.Join(p.uploadDir, "covers")
-	if err := os.MkdirAll(videoDir, 0o755); err != nil {
-		return "", "", fmt.Errorf("create video output directory: %w", err)
-	}
-	if err := os.MkdirAll(coverDir, 0o755); err != nil {
-		return "", "", fmt.Errorf("create poster output directory: %w", err)
+// Transcode 把任意 ffmpeg 可读的视频统一转成浏览器兼容的 MP4，并抽首帧做封面。
+func (p *Processor) Transcode(ctx context.Context, sourcePath string, videoPath string, posterPath string) error {
+	if strings.TrimSpace(sourcePath) == "" {
+		return errors.New("empty media source path")
 	}
 
-	videoName := fmt.Sprintf("%d.mp4", task.ID)
-	posterName := fmt.Sprintf("%d.jpg", task.ID)
-	videoPath := filepath.Join(videoDir, videoName)
-	posterPath := filepath.Join(coverDir, posterName)
-	// 临时文件保留真实扩展名，让 ffmpeg 能按输出扩展名选择容器和图片格式。
-	videoTemp := videoPath + ".processing.mp4"
-	posterTemp := posterPath + ".processing.jpg"
-	defer func() {
-		_ = os.Remove(videoTemp)
-		_ = os.Remove(posterTemp)
-	}()
-
-	if err := normalizeVideo(ctx, task.SourcePath, videoTemp); err != nil {
-		return "", "", fmt.Errorf("transcode video: %w", err)
+	if err := normalizeVideo(ctx, sourcePath, videoPath); err != nil {
+		return fmt.Errorf("transcode video: %w", err)
 	}
-	if err := ensureNonEmptyFile(videoTemp); err != nil {
-		return "", "", err
+	if err := ensureNonEmptyFile(videoPath); err != nil {
+		return err
 	}
 
-	if err := runFFmpeg(ctx, videoTemp, posterTemp,
+	// 封面从转码产物取，而不是从源文件取：这样封面与实际播放的画面一致。
+	if err := runFFmpeg(ctx, videoPath, posterPath,
 		"-frames:v", "1",
 		"-vf", "scale=720:-2",
 		"-q:v", "3",
 	); err != nil {
-		return "", "", fmt.Errorf("generate video poster: %w", err)
+		return fmt.Errorf("generate video poster: %w", err)
 	}
-	if err := ensureNonEmptyFile(posterTemp); err != nil {
-		return "", "", err
-	}
-
-	if err := os.Rename(videoTemp, videoPath); err != nil {
-		return "", "", fmt.Errorf("install transcoded video: %w", err)
-	}
-	if err := os.Rename(posterTemp, posterPath); err != nil {
-		_ = os.Remove(videoPath)
-		return "", "", fmt.Errorf("install video poster: %w", err)
-	}
-
-	return "/static/videos/" + videoName, "/static/covers/" + posterName, nil
+	return ensureNonEmptyFile(posterPath)
 }
 
 func normalizeVideo(ctx context.Context, input string, output string) error {
@@ -133,22 +102,6 @@ func ensureNonEmptyFile(path string) error {
 	}
 	if info.Size() == 0 {
 		return errors.New("media output is empty")
-	}
-	return nil
-}
-
-func (p *Processor) validateSourcePath(sourcePath string) error {
-	root, err := filepath.Abs(p.uploadDir)
-	if err != nil {
-		return fmt.Errorf("resolve upload directory: %w", err)
-	}
-	source, err := filepath.Abs(sourcePath)
-	if err != nil {
-		return fmt.Errorf("resolve source path: %w", err)
-	}
-	relative, err := filepath.Rel(root, source)
-	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) || !strings.HasPrefix(relative, "sources"+string(filepath.Separator)) {
-		return errors.New("media source path is outside the private source directory")
 	}
 	return nil
 }

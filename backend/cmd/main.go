@@ -25,6 +25,7 @@ import (
 	"my_feed_system/internal/observability"
 	"my_feed_system/internal/outbox"
 	"my_feed_system/internal/popularity"
+	"my_feed_system/internal/storage"
 	"my_feed_system/internal/video"
 	"my_feed_system/internal/wallet"
 )
@@ -136,6 +137,20 @@ func main() {
 	go outbox.NewPoller(outbox.NewRepo(database), publisher).Run(ctx)
 	go wallet.NewExpirePoller(wallet.NewService(database)).Run(ctx)
 
+	objectStore, err := storage.New(storage.Config{
+		Endpoint:       cfg.Storage.Endpoint,
+		PublicEndpoint: cfg.Storage.PublicEndpoint,
+		AccessKey:      cfg.Storage.AccessKey,
+		SecretKey:      cfg.Storage.SecretKey,
+		UseSSL:         cfg.Storage.UseSSL,
+		Region:         cfg.Storage.Region,
+		BucketUploads:  cfg.Storage.BucketUploads,
+		BucketMedia:    cfg.Storage.BucketMedia,
+	})
+	if err != nil {
+		fatal("connect object storage failed", err)
+	}
+
 	router := httpserver.NewRouterWithLocalCaches(
 		database,
 		redisCmd,
@@ -145,7 +160,7 @@ func main() {
 		localLatestCache,
 		localHotCache,
 		cfg.JWT.Secret,
-		cfg.Upload.Dir,
+		objectStore,
 		cfg.Upload.MaxVideoBytes,
 		cfg.Audit,
 		cfg.Auth,

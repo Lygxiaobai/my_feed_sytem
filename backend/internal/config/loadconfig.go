@@ -18,6 +18,7 @@ type Config struct {
 	RabbitMQ  RabbitMQConfig  `yaml:"rabbitmq"`
 	JWT       JWTConfig       `yaml:"jwt"`
 	Upload    UploadConfig    `yaml:"upload"`
+	Storage   StorageConfig   `yaml:"storage"`
 	Pprof     PprofConfig     `yaml:"pprof"`
 	Metrics   MetricsConfig   `yaml:"metrics"`
 	Log       LogConfig       `yaml:"log"`
@@ -253,6 +254,22 @@ type JWTConfig struct {
 type UploadConfig struct {
 	Dir           string `yaml:"dir"`
 	MaxVideoBytes int64  `yaml:"max_video_bytes"`
+}
+
+// StorageConfig 是对象存储（Silo，S3 兼容）的接入参数。
+//
+// Endpoint 与 PublicEndpoint 必须分开：前者是 compose 网络内地址，供 backend/worker
+// 自己读写；后者是浏览器实际连接的地址，只用于给分片签预签名 URL。SigV4 把 Host
+// 算进签名，用内网地址签出来的 URL 浏览器一用就是 403。
+type StorageConfig struct {
+	Endpoint       string `yaml:"endpoint"`
+	PublicEndpoint string `yaml:"public_endpoint"`
+	AccessKey      string `yaml:"access_key"`
+	SecretKey      string `yaml:"secret_key"`
+	UseSSL         bool   `yaml:"use_ssl"`
+	Region         string `yaml:"region"`
+	BucketUploads  string `yaml:"bucket_uploads"`
+	BucketMedia    string `yaml:"bucket_media"`
 }
 
 type PprofConfig struct {

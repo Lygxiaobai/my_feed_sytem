@@ -309,3 +309,104 @@ export function postFormWithProgress<T>(
     xhr.send(body)
   })
 }
+
+/**
+ * 把一个分片直接 PUT 到对象存储的预签名 URL，返回该分片的 ETag。
+ *
+ * 与 postFormWithProgress 的三点关键差别：
+ *   1. 不带 Authorization 头。预签名 URL 自身即凭据，多一个头会让 SigV4 校验失败。
+ *   2. body 是裸 Blob，不包 FormData。签名覆盖的是整个请求体，multipart 边界会破坏它。
+ *   3. 响应不是应用的 JSON 信封，而是 S3 的空响应；要的是 ETag 响应头。
+ *      读得到 ETag 依赖对象存储回 Access-Control-Expose-Headers，Silo 默认已包含。
+ */
+export function putBinaryWithProgress(
+  url: string,
+  body: Blob,
+  options?: {
+    onProgress?: (progress: FormUploadProgress) => void
+    signal?: AbortSignal
+  },
+): Promise<string> {
+  if (options?.signal?.aborted) {
+    return Promise.reject(new AbortedError())
+  }
+
+  return new Promise<string>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('PUT', url)
+
+    const onProgress = options?.onProgress
+    let loaded = 0
+    let total = body.size
+    let stalled = false
+    let lastActive = Date.now()
+    let awaitingAck = false
+    const emitProgress = (stage: FormUploadStage, percent: number) => {
+      onProgress?.({ percent, loaded, total, stage })
+    }
+
+    xhr.upload.onprogress = (event) => {
+      lastActive = Date.now()
+      if (!onProgress || !event.lengthComputable || event.total <= 0) return
+      loaded = event.loaded
+      total = event.total
+      emitProgress('sending', mapUploadSendPercent(loaded, total))
+    }
+    xhr.upload.onload = () => {
+      lastActive = Date.now()
+      awaitingAck = true
+      if (onProgress) emitProgress('confirming', total > 0 ? UPLOAD_SEND_PERCENT_CAP : 90)
+    }
+
+    const signal = options?.signal
+    const abort = () => xhr.abort()
+    signal?.addEventListener('abort', abort)
+    const stallTimer = window.setInterval(() => {
+      const limit = awaitingAck ? 120_000 : 90_000
+      if (Date.now() - lastActive < limit) return
+      stalled = true
+      xhr.abort()
+    }, 5_000)
+    const cleanup = () => {
+      window.clearInterval(stallTimer)
+      signal?.removeEventListener('abort', abort)
+    }
+
+    xhr.onload = () => {
+      cleanup()
+      if (xhr.status < 200 || xhr.status >= 300) {
+        reject(new ApiError('分片上传失败，请重试', xhr.status))
+        return
+      }
+      const etag = xhr.getResponseHeader('ETag') || xhr.getResponseHeader('etag')
+      if (!etag) {
+        // 拿不到 ETag 就无法拼装。多半是跨域没暴露该响应头，属于部署问题而非用户操作问题。
+        reject(new ApiError('上传校验失败，请重试', 0))
+        return
+      }
+      emitProgress('done', 100)
+      resolve(etag)
+    }
+
+    xhr.onerror = () => {
+      cleanup()
+      reject(new ApiError('网络异常，请检查连接后重试', 0))
+    }
+
+    xhr.ontimeout = () => {
+      cleanup()
+      reject(new ApiError('上传超时，请重试', 0))
+    }
+
+    xhr.onabort = () => {
+      cleanup()
+      if (stalled) {
+        reject(new ApiError('上传超时，请检查网络后重试', 0))
+        return
+      }
+      reject(new AbortedError())
+    }
+
+    xhr.send(body)
+  })
+}

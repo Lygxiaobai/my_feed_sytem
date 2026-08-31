@@ -67,6 +67,37 @@ services:
       retries: 12
       start_period: 20s
 
+  # 对象存储。S3 API(9000) 不发布到宿主，只在 compose 网络内供 backend/worker 使用；
+  # 浏览器直传和媒体读取都经 frontend 的 nginx 反代，不额外开公网端口。
+  silo:
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+    image: pgsty/silo:RELEASE.2026-08-06T00-00-00Z
+    container_name: my-feed-system-silo
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${SILO_ROOT_USER:?SILO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${SILO_ROOT_PASSWORD:?SILO_ROOT_PASSWORD is required}
+      # 内置更新器仍指向上游 MinIO 的 release feed 和签名密钥，升级只能换镜像 tag。
+      MINIO_UPDATE: "off"
+      TZ: Asia/Shanghai
+    command: server /data --console-address :9001
+    volumes:
+      - silo_data:/data
+    ports:
+      # 控制台只绑本机，经 SSH 隧道访问，与可观测性栈同一套约定。
+      - "127.0.0.1:${SILO_CONSOLE_PORT:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "silo", "healthcheck", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 512m
+
   backend:
     logging:
       driver: json-file
@@ -117,6 +148,14 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-}
       STRIPE_CURRENCY: ${STRIPE_CURRENCY:-usd}
+      # 对象存储。ENDPOINT 是 compose 网络内地址；PUBLIC_ENDPOINT 是浏览器实际连的地址，
+      # 预签名把 Host 算进 SigV4，两者不能混用。
+      SILO_ENDPOINT: ${SILO_ENDPOINT:-silo:9000}
+      SILO_PUBLIC_ENDPOINT: ${SILO_PUBLIC_ENDPOINT:-}
+      SILO_ACCESS_KEY: ${SILO_ACCESS_KEY:?SILO_ACCESS_KEY is required}
+      SILO_SECRET_KEY: ${SILO_SECRET_KEY:?SILO_SECRET_KEY is required}
+      SILO_BUCKET_UPLOADS: ${SILO_BUCKET_UPLOADS:-feed-uploads}
+      SILO_BUCKET_MEDIA: ${SILO_BUCKET_MEDIA:-feed-media}
     restart: unless-stopped
     depends_on:
       mysql:
@@ -124,6 +163,8 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      silo:
         condition: service_healthy
     volumes:
       - ./backend/configs/config.docker.yaml:/app/configs/config.yaml:ro
@@ -167,6 +208,13 @@ services:
       EMBEDDING_API_URL: ${EMBEDDING_API_URL:-}
       EMBEDDING_API_KEY: ${EMBEDDING_API_KEY:-}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-small}
+      # 转码要从 feed-uploads 取源、把成品写回 feed-media，两个桶都要。
+      SILO_ENDPOINT: ${SILO_ENDPOINT:-silo:9000}
+      SILO_PUBLIC_ENDPOINT: ${SILO_PUBLIC_ENDPOINT:-}
+      SILO_ACCESS_KEY: ${SILO_ACCESS_KEY:?SILO_ACCESS_KEY is required}
+      SILO_SECRET_KEY: ${SILO_SECRET_KEY:?SILO_SECRET_KEY is required}
+      SILO_BUCKET_UPLOADS: ${SILO_BUCKET_UPLOADS:-feed-uploads}
+      SILO_BUCKET_MEDIA: ${SILO_BUCKET_MEDIA:-feed-media}
     restart: unless-stopped
     command: ["/app/worker"]
     depends_on:
@@ -175,6 +223,8 @@ services:
       redis:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      silo:
         condition: service_healthy
       backend:
         condition: service_healthy
@@ -323,3 +373,4 @@ volumes:
   redis_data:
   rabbitmq_data:
   uploads_data:
+  silo_data:

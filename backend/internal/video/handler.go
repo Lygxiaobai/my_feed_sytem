@@ -15,17 +15,18 @@ import (
 	"my_feed_system/internal/media"
 	"my_feed_system/internal/middleware/ratelimit"
 	"my_feed_system/internal/response"
+	"my_feed_system/internal/storage"
 )
 
 type Handler struct {
-	service   *Service
-	uploadDir string
-	media     *media.Service
-	limiter   ratelimit.Checker
+	service *Service
+	store   storage.ObjectStore
+	media   *media.Service
+	limiter ratelimit.Checker
 }
 
-func NewHandler(service *Service, uploadDir string, mediaService *media.Service, limiter ratelimit.Checker) *Handler {
-	return &Handler{service: service, uploadDir: uploadDir, media: mediaService, limiter: limiter}
+func NewHandler(service *Service, store storage.ObjectStore, mediaService *media.Service, limiter ratelimit.Checker) *Handler {
+	return &Handler{service: service, store: store, media: mediaService, limiter: limiter}
 }
 
 func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
@@ -37,9 +38,10 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 
 func (h *Handler) RegisterProtectedRoutes(rg *gin.RouterGroup, uploadMW []gin.HandlerFunc, publishMW []gin.HandlerFunc) {
 	rg.POST("/uploadVideo", append(append([]gin.HandlerFunc{}, uploadMW...), h.UploadVideo)...)
-	// 建会话和分段都不走「一条视频」限流；配额只在 uploadInit 扣一次。
+	// 建会话和拼装都不走「一条视频」限流；配额只在 uploadInit 扣一次。
+	// 分片字节直传对象存储，不再经过后端，因此没有 uploadPart 这个路由。
 	rg.POST("/uploadInit", h.UploadInit)
-	rg.POST("/uploadPart", h.UploadPart)
+	rg.POST("/uploadComplete", h.UploadComplete)
 	rg.POST("/uploadCover", h.UploadCover)
 	rg.POST("/mediaTaskStatus", h.MediaTaskStatus)
 	rg.POST("/publish", append(append([]gin.HandlerFunc{}, publishMW...), h.Publish)...)
@@ -68,7 +70,7 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 		return
 	}
 
-	task, err := h.media.CreateVideoTask(c.GetUint64("account_id"), file)
+	task, err := h.media.CreateVideoTask(c.Request.Context(), c.GetUint64("account_id"), file)
 	if err != nil {
 		if errors.Is(err, media.ErrVideoUploadTooLarge) {
 			response.Fail(c, http.StatusBadRequest, response.UploadTooLarge, err)
@@ -86,6 +88,8 @@ func (h *Handler) UploadVideo(c *gin.Context) {
 	response.OKWithStatus(c, http.StatusAccepted, gin.H{"task": task})
 }
 
+// UploadInit 开一次分片直传，返回每一段的预签名 URL。
+// 之后浏览器把字节直接 PUT 给对象存储，后端不再经手视频内容。
 func (h *Handler) UploadInit(c *gin.Context) {
 	if h.media == nil {
 		response.Fail(c, http.StatusServiceUnavailable, response.MiddlewareError, nil)
@@ -101,77 +105,55 @@ func (h *Handler) UploadInit(c *gin.Context) {
 	if !h.enforceUploadQuota(c) {
 		return
 	}
-	partBytes := media.UploadPartBytes
+
+	// 直连灰云时不经 Cloudflare，可以多开几路。
+	// 分片尺寸不再随通道变化：S3 对非末尾分片有 5MiB 硬下限，
+	// 低于它整单会以 EntityTooSmall 作废，没有为通道让步的余地。
 	concurrency := media.UploadPartConcurrency
-	// 直连源站时不再绕 Cloudflare，可以用大段多路。地址只来自进程环境，避免 overlay YAML 盖掉。
-	origin := strings.TrimRight(strings.TrimSpace(os.Getenv("VIDEO_UPLOAD_ORIGIN")), "/")
-	if origin != "" {
-		partBytes = media.UploadPartMaxBytes
+	if strings.TrimSpace(os.Getenv("VIDEO_UPLOAD_ORIGIN")) != "" {
 		concurrency = media.UploadPartDirectConcurrency
 	}
-	sessionID, count, err := h.media.BeginUpload(c.GetUint64("account_id"), req.Total, partBytes)
+
+	result, err := h.media.InitMultipart(c.Request.Context(), c.GetUint64("account_id"), req.Total, media.UploadPartBytes)
 	if err != nil {
 		h.replyUploadErr(c, err)
 		return
 	}
-	payload := gin.H{
-		"session_id":       sessionID,
-		"part_bytes":       partBytes,
+
+	response.OK(c, gin.H{
+		"upload_id":        result.UploadID,
+		"object_key":       result.ObjectKey,
+		"part_urls":        result.PartURLs,
+		"part_bytes":       result.PartBytes,
+		"part_count":       result.PartCount,
 		"part_concurrency": concurrency,
-		"part_count":       count,
-	}
-	if origin != "" {
-		payload["part_origin"] = origin
-	}
-	response.OK(c, payload)
+	})
 }
 
-func (h *Handler) UploadPart(c *gin.Context) {
+// UploadComplete 收下客户端攒齐的分片 ETag，拼装成源文件并登记转码任务。
+func (h *Handler) UploadComplete(c *gin.Context) {
 	if h.media == nil {
 		response.Fail(c, http.StatusServiceUnavailable, response.MiddlewareError, nil)
 		return
 	}
-
-	// 会话放请求头：不依赖 multipart 里排在文件后面的字段。
-	sessionID := strings.TrimSpace(c.GetHeader("X-Upload-Session"))
-	index, indexErr := strconv.Atoi(strings.TrimSpace(c.GetHeader("X-Upload-Index")))
-	count, countErr := strconv.Atoi(strings.TrimSpace(c.GetHeader("X-Upload-Count")))
-	if sessionID == "" || indexErr != nil || countErr != nil {
-		response.FailTip(c, http.StatusBadRequest, response.ParamMissing, "上传已失效，请重新选择视频", nil)
+	var req struct {
+		UploadID  string         `json:"upload_id"`
+		ObjectKey string         `json:"object_key"`
+		Parts     []storage.Part `json:"parts"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.UploadID == "" || req.ObjectKey == "" || len(req.Parts) == 0 {
+		response.FailTip(c, http.StatusBadRequest, response.ParamError, "上传已失效，请重新选择视频", err)
 		return
 	}
 
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, media.UploadPartMaxBytes+2<<20)
-	file, err := c.FormFile("file")
-	if err != nil {
-		if strings.Contains(err.Error(), "request body too large") {
-			response.Fail(c, http.StatusRequestEntityTooLarge, response.UploadTooLarge, err)
-			return
-		}
-		response.FailTip(c, http.StatusBadRequest, response.ParamMissing, "请选择要上传的视频文件", err)
-		return
-	}
-
-	src, err := file.Open()
-	if err != nil {
-		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
-		return
-	}
-	defer src.Close()
-
-	received, task, err := h.media.PutUploadPart(c.GetUint64("account_id"), sessionID, index, count, src, file.Size)
+	task, err := h.media.CompleteMultipart(c.Request.Context(), c.GetUint64("account_id"), req.ObjectKey, req.UploadID, req.Parts)
 	if err != nil {
 		h.replyUploadErr(c, err)
 		return
 	}
 
-	payload := gin.H{"session_id": sessionID, "received": received}
-	if task != nil {
-		payload["task"] = task
-		response.OKWithStatus(c, http.StatusAccepted, payload)
-		return
-	}
-	response.OK(c, payload)
+	// 转码是异步的，用 202 表达「已接收，仍在处理」。
+	response.OKWithStatus(c, http.StatusAccepted, gin.H{"task": task})
 }
 
 // enforceUploadQuota 与路由上 video.upload.* 使用同一把 Redis 钥匙，
@@ -214,16 +196,8 @@ func (h *Handler) replyUploadErr(c *gin.Context, err error) {
 		response.FailTip(c, http.StatusBadRequest, response.UploadTypeInvalid, "视频文件内容为空", err)
 		return
 	}
-	if errors.Is(err, media.ErrUploadSessionNotFound) {
+	if errors.Is(err, media.ErrUploadKeyRejected) {
 		response.FailTip(c, http.StatusBadRequest, response.ParamError, "上传已失效，请重新选择视频", err)
-		return
-	}
-	if errors.Is(err, media.ErrUploadSessionConflict) {
-		response.FailTip(c, http.StatusBadRequest, response.ParamError, "上传进度不一致，请重新选择视频", err)
-		return
-	}
-	if errors.Is(err, media.ErrTooManyUploadSessions) {
-		response.FailTip(c, http.StatusTooManyRequests, response.RateLimited, "还有未完成的上传，请先取消或稍后再试", err)
 		return
 	}
 	response.Fail(c, http.StatusInternalServerError, response.SystemError, err)
@@ -479,33 +453,53 @@ func (h *Handler) MediaTaskStatus(c *gin.Context) {
 	response.OK(c, gin.H{"task": task})
 }
 
+// uploadFile 处理封面这类小文件：字节仍经过后端（要校验魔数），但落点是媒体桶。
 func (h *Handler) uploadFile(c *gin.Context, formField string, subDir string) {
+	if h.store == nil {
+		response.Fail(c, http.StatusServiceUnavailable, response.MiddlewareError, nil)
+		return
+	}
 	file, err := c.FormFile(formField)
 	if err != nil {
 		response.FailTip(c, http.StatusBadRequest, response.ParamMissing, "请选择要上传的文件", err)
 		return
 	}
-	if err := NewMediaValidator(h.uploadDir).ValidateUploadedFile(file, subDir); err != nil {
+	if err := NewMediaValidator().ValidateUploadedFile(file, subDir); err != nil {
 		response.Fail(c, http.StatusBadRequest, response.UploadTypeInvalid, err)
 		return
 	}
 
 	ext := strings.ToLower(filepath.Ext(file.Filename))
 	filename := fmt.Sprintf("%d_%d%s", c.GetUint64("account_id"), time.Now().UnixNano(), ext)
-	targetDir := filepath.Join(h.uploadDir, subDir)
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		response.Fail(c, http.StatusInternalServerError, response.SystemError, err)
+	key := subDir + "/" + filename
+
+	src, err := file.Open()
+	if err != nil {
+		response.Fail(c, http.StatusBadRequest, response.ParamError, err)
 		return
 	}
+	defer src.Close()
 
-	targetPath := filepath.Join(targetDir, filename)
-	if err := c.SaveUploadedFile(file, targetPath); err != nil {
+	if err := h.store.PutMedia(c.Request.Context(), key, src, file.Size, contentTypeForExt(ext)); err != nil {
 		response.Fail(c, http.StatusInternalServerError, response.SystemError, err)
 		return
 	}
 
 	response.OK(c, gin.H{
 		"filename": filename,
-		"url":      "/static/" + subDir + "/" + filename,
+		"url":      "/static/" + key,
 	})
+}
+
+// contentTypeForExt 让对象带上正确的 Content-Type：
+// 浏览器直接从对象存储取封面，类型错了会当成下载而不是图片渲染。
+func contentTypeForExt(ext string) string {
+	switch ext {
+	case ".png":
+		return "image/png"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/jpeg"
+	}
 }

@@ -54,12 +54,12 @@ func (s *Service) WithFollowingFanout(fanout *FollowingFanout) *Service {
 	return s
 }
 
-func NewService(db *gorm.DB, popularityService *popularity.Service, uploadDir string) *Service {
-	return NewServiceWithCachesAndTimeline(db, popularityService, nil, nil, nil, nil, nil, uploadDir)
+func NewService(db *gorm.DB, popularityService *popularity.Service) *Service {
+	return NewServiceWithCachesAndTimeline(db, popularityService, nil, nil, nil, nil, nil)
 }
 
-func NewServiceWithLatestCache(db *gorm.DB, popularityService *popularity.Service, latestCache *LatestCache, uploadDir string) *Service {
-	return NewServiceWithCachesAndTimeline(db, popularityService, latestCache, nil, nil, nil, nil, uploadDir)
+func NewServiceWithLatestCache(db *gorm.DB, popularityService *popularity.Service, latestCache *LatestCache) *Service {
+	return NewServiceWithCachesAndTimeline(db, popularityService, latestCache, nil, nil, nil, nil)
 }
 
 func NewServiceWithLatestCacheAndTimeline(
@@ -67,9 +67,8 @@ func NewServiceWithLatestCacheAndTimeline(
 	popularityService *popularity.Service,
 	latestCache *LatestCache,
 	timelineStore *GlobalTimelineStore,
-	uploadDir string,
 ) *Service {
-	return NewServiceWithCachesAndTimeline(db, popularityService, latestCache, nil, nil, nil, timelineStore, uploadDir)
+	return NewServiceWithCachesAndTimeline(db, popularityService, latestCache, nil, nil, nil, timelineStore)
 }
 
 func NewServiceWithCachesAndTimeline(
@@ -80,7 +79,6 @@ func NewServiceWithCachesAndTimeline(
 	hotCache *HotPageCache,
 	localHotCache *LocalHotPageCache,
 	timelineStore *GlobalTimelineStore,
-	uploadDir string,
 ) *Service {
 	return &Service{
 		repo:             NewRepo(db),
@@ -90,7 +88,7 @@ func NewServiceWithCachesAndTimeline(
 		hotCache:         hotCache,
 		localHotCache:    localHotCache,
 		timelineStore:    timelineStore,
-		mediaValidator:   video.NewMediaValidator(uploadDir),
+		mediaValidator:   video.NewMediaValidator(),
 	}
 }
 
