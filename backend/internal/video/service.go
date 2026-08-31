@@ -21,6 +21,7 @@ import (
 	"my_feed_system/internal/observability"
 	"my_feed_system/internal/outbox"
 	"my_feed_system/internal/popularity"
+	"my_feed_system/internal/storage"
 	"my_feed_system/internal/tag"
 )
 
@@ -56,24 +57,25 @@ type Service struct {
 	localDetail     *LocalDetailCache
 	publisher       *mq.Publisher
 	mediaValidator  MediaValidator
+	store           storage.ObjectStore
 	approval        *ApprovalPublisher
 	auditEnabled    bool
 	detailGroup     singleflight.Group
 }
 
-func NewService(db *gorm.DB, popularityService *popularity.Service, uploadDir string) *Service {
-	return NewServiceWithCachesAndPublisher(db, popularityService, nil, nil, nil, uploadDir, false)
+func NewService(db *gorm.DB, popularityService *popularity.Service, store storage.ObjectStore) *Service {
+	return NewServiceWithCachesAndPublisher(db, popularityService, nil, nil, nil, store, false)
 }
 
-func NewServiceWithDetailCache(db *gorm.DB, popularityService *popularity.Service, detailCache *DetailCache, uploadDir string) *Service {
-	return NewServiceWithCachesAndPublisher(db, popularityService, detailCache, nil, nil, uploadDir, false)
+func NewServiceWithDetailCache(db *gorm.DB, popularityService *popularity.Service, detailCache *DetailCache, store storage.ObjectStore) *Service {
+	return NewServiceWithCachesAndPublisher(db, popularityService, detailCache, nil, nil, store, false)
 }
 
-func NewServiceWithDetailCacheAndPublisher(db *gorm.DB, popularityService *popularity.Service, detailCache *DetailCache, publisher *mq.Publisher, uploadDir string) *Service {
-	return NewServiceWithCachesAndPublisher(db, popularityService, detailCache, nil, publisher, uploadDir, false)
+func NewServiceWithDetailCacheAndPublisher(db *gorm.DB, popularityService *popularity.Service, detailCache *DetailCache, publisher *mq.Publisher, store storage.ObjectStore) *Service {
+	return NewServiceWithCachesAndPublisher(db, popularityService, detailCache, nil, publisher, store, false)
 }
 
-func NewServiceWithCachesAndPublisher(db *gorm.DB, popularityService *popularity.Service, detailCache *DetailCache, localDetail *LocalDetailCache, publisher *mq.Publisher, uploadDir string, auditEnabled bool) *Service {
+func NewServiceWithCachesAndPublisher(db *gorm.DB, popularityService *popularity.Service, detailCache *DetailCache, localDetail *LocalDetailCache, publisher *mq.Publisher, store storage.ObjectStore, auditEnabled bool) *Service {
 	return &Service{
 		db:              db,
 		repo:            NewRepo(db),
@@ -83,10 +85,48 @@ func NewServiceWithCachesAndPublisher(db *gorm.DB, popularityService *popularity
 		detailCache:     detailCache,
 		localDetail:     localDetail,
 		publisher:       publisher,
-		mediaValidator:  NewMediaValidator(uploadDir),
+		mediaValidator:  NewMediaValidator(),
+		store:           store,
 		approval:        NewApprovalPublisher(db),
 		auditEnabled:    auditEnabled,
 	}
+}
+
+// publishStatTimeout 限制发布校验里那一两次对象存储往返。
+// 存储抖动时宁可让发布失败，也不要把请求挂住。
+const publishStatTimeout = 5 * time.Second
+
+// normalizePublishURLs 归一化并确认媒体确实存在。
+//
+// 读路径已经不再探测存储，这里是唯一还能挡住「伪造 play_url」的地方：
+// 形状合法但对象不存在的 URL 一旦入库，就会在信息流里长期留下一条打不开的作品。
+func (s *Service) normalizePublishURLs(playURL string, coverURL string) (string, string, error) {
+	normalizedPlay, normalizedCover, err := s.mediaValidator.NormalizePublishURLs(playURL, coverURL)
+	if err != nil {
+		return "", "", err
+	}
+	if s.store == nil {
+		return normalizedPlay, normalizedCover, nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), publishStatTimeout)
+	defer cancel()
+
+	if _, err := s.store.StatMedia(ctx, ObjectKey(normalizedPlay)); err != nil {
+		if errors.Is(err, storage.ErrObjectNotFound) {
+			return "", "", ErrInvalidPlayURL
+		}
+		return "", "", fmt.Errorf("stat play object: %w", err)
+	}
+	if normalizedCover != "" {
+		if _, err := s.store.StatMedia(ctx, ObjectKey(normalizedCover)); err != nil {
+			if errors.Is(err, storage.ErrObjectNotFound) {
+				return "", "", ErrInvalidCoverURL
+			}
+			return "", "", fmt.Errorf("stat cover object: %w", err)
+		}
+	}
+	return normalizedPlay, normalizedCover, nil
 }
 
 // Publish creates a video exactly once for the same idempotency key and payload.
@@ -96,7 +136,7 @@ func (s *Service) Publish(accountID uint64, username string, idemKey string, req
 		return nil, err
 	}
 
-	playURL, coverURL, err := s.mediaValidator.NormalizePublishURLs(req.PlayURL, req.CoverURL)
+	playURL, coverURL, err := s.normalizePublishURLs(req.PlayURL, req.CoverURL)
 	if err != nil {
 		return nil, err
 	}

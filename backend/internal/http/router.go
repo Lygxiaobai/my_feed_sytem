@@ -2,7 +2,6 @@ package http
 
 import (
 	"log/slog"
-	"path/filepath"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +35,7 @@ import (
 	"my_feed_system/internal/report"
 	"my_feed_system/internal/response"
 	"my_feed_system/internal/social"
+	"my_feed_system/internal/storage"
 	"my_feed_system/internal/video"
 	"my_feed_system/internal/wallet"
 )
@@ -46,9 +46,9 @@ func NewRouter(
 	popularityService *popularity.Service,
 	publisher *mq.Publisher,
 	jwtSecret string,
-	uploadDir string,
+	store storage.ObjectStore,
 ) *gin.Engine {
-	return NewRouterWithLocalCaches(db, redisClient, popularityService, publisher, nil, nil, nil, jwtSecret, uploadDir, 0, config.AuditConfig{}, config.AuthConfig{}, config.OpsConfig{}, config.StripeConfig{}, config.FeedConfig{}, config.EmbeddingConfig{})
+	return NewRouterWithLocalCaches(db, redisClient, popularityService, publisher, nil, nil, nil, jwtSecret, store, 0, config.AuditConfig{}, config.AuthConfig{}, config.OpsConfig{}, config.StripeConfig{}, config.FeedConfig{}, config.EmbeddingConfig{})
 }
 
 func NewRouterWithLocalCaches(
@@ -60,7 +60,7 @@ func NewRouterWithLocalCaches(
 	localLatestCache *feed.LocalLatestPageCache,
 	localHotCache *feed.LocalHotPageCache,
 	jwtSecret string,
-	uploadDir string,
+	store storage.ObjectStore,
 	maxVideoBytes int64,
 	auditCfg config.AuditConfig,
 	authCfg config.AuthConfig,
@@ -84,9 +84,8 @@ func NewRouterWithLocalCaches(
 		response.OK(c, gin.H{"message": "pong"})
 	})
 	r.GET("/metrics", gin.WrapH(observability.NewMetricsHandler()))
-	// 仅暴露处理后的媒体目录，sources 目录只供 Worker 读取，避免原始上传文件被直接访问。
-	r.Static("/static/videos", filepath.Join(uploadDir, "videos"))
-	r.Static("/static/covers", filepath.Join(uploadDir, "covers"))
+	// /static/ 不再由后端发送：媒体已迁到对象存储，由 nginx 直接反代媒体桶，
+	// 后端彻底离开字节路径。源文件在私有桶里，本就无法被直接访问。
 
 	tokenCache := account.NewTokenCache(redisClient)
 	detailCache := video.NewDetailCache(redisClient)
@@ -295,10 +294,10 @@ func NewRouterWithLocalCaches(
 		detailCache,
 		localDetailCache,
 		publisher,
-		uploadDir,
+		store,
 		auditCfg.Enabled,
 	)
-	videoHandler := video.NewHandler(videoService, uploadDir, media.NewService(db, uploadDir, maxVideoBytes), rateLimiter)
+	videoHandler := video.NewHandler(videoService, store, media.NewService(db, store, maxVideoBytes), rateLimiter)
 	videoGroup := r.Group("/video")
 	// 公开路由挂可选鉴权：作者本人需要能看到自己尚未过审的内容，
 	// 匿名访问则只看得到已过审的。
@@ -410,7 +409,7 @@ func NewRouterWithLocalCaches(
 		recommend.NewHTTPEmbedder(embeddingCfg),
 		redisClient,
 		popularityService,
-		video.NewMediaValidator(uploadDir),
+		video.NewMediaValidator(),
 		recCfg,
 	)
 
@@ -509,7 +508,6 @@ func NewRouterWithLocalCaches(
 		hotCache,
 		localHotCache,
 		timelineStore,
-		uploadDir,
 	)
 	if redisClient != nil {
 		fanoutCfg := feedCfg.Fanout

@@ -6,18 +6,24 @@ import (
 	"io"
 	"mime/multipart"
 	"net/url"
-	"os"
-	"path/filepath"
+	"path"
 	"strings"
 )
 
 /*
 *
-媒体文件守门员
+媒体 URL 守门员
 
-上传时验文件
-发布视频时验 URL
-读视频/feed 时过滤脏数据
+上传时验文件内容（封面走后端中转，字节在手上，校验免费）
+发布时验 URL 形状，存在性由 Service 结合对象存储另行确认
+读取时只验形状
+
+**读路径不访问对象存储**：FilterPlayable / IsPlayable 在每条 feed 的每个视频上都会调用，
+改造前它们各开一次本地文件读 32 字节魔数。搬到对象存储后同样的写法等于每页几十次
+网络往返，因此内容校验整体前移到写路径（Worker 转码产出时 + 发布时），
+读路径只做字符串形状检查。
+
+代价：对象被外部删除或损坏时，feed 不再自动过滤该条，需要靠运维发现。
 */
 var (
 	ErrInvalidPlayURL     = errors.New("play_url must reference an uploaded video")
@@ -26,13 +32,11 @@ var (
 	ErrInvalidCoverUpload = errors.New("uploaded file is not a supported cover")
 )
 
-// MediaValidator keeps media URL checks in one place so write and read paths stay consistent.
-type MediaValidator struct {
-	uploadDir string
-}
+// MediaValidator 不持有任何依赖，构造代价为零，可以在读路径上随意使用。
+type MediaValidator struct{}
 
-func NewMediaValidator(uploadDir string) MediaValidator {
-	return MediaValidator{uploadDir: uploadDir}
+func NewMediaValidator() MediaValidator {
+	return MediaValidator{}
 }
 
 // ValidateUploadedFile rejects placeholder text files before they reach persistent storage.
@@ -57,16 +61,18 @@ func (v MediaValidator) ValidateUploadedFile(file *multipart.FileHeader, subDir 
 	return ErrInvalidCoverUpload
 }
 
+// NormalizePublishURLs 只判定 URL 形状是否合法并归一化。
+// 对象是否真的存在由 Service.normalizePublishURLs 补一次 Stat。
 func (v MediaValidator) NormalizePublishURLs(playURL string, coverURL string) (string, string, error) {
 	normalizedPlayURL, ok := v.normalizeManagedURL(playURL, "videos")
-	if !ok || !v.hasManagedPlayableFile(normalizedPlayURL, "videos") {
+	if !ok {
 		return "", "", ErrInvalidPlayURL
 	}
 
 	normalizedCoverURL := ""
 	if coverURL != "" {
 		normalizedCoverURL, ok = v.normalizeManagedURL(coverURL, "covers")
-		if !ok || !v.hasManagedPlayableFile(normalizedCoverURL, "covers") {
+		if !ok {
 			return "", "", ErrInvalidCoverURL
 		}
 	}
@@ -75,11 +81,13 @@ func (v MediaValidator) NormalizePublishURLs(playURL string, coverURL string) (s
 }
 
 func (v MediaValidator) IsPlayable(item Video) bool {
-	if !v.isManagedPlayableFile(item.PlayURL, "videos") {
+	if _, ok := v.normalizeManagedURL(item.PlayURL, "videos"); !ok {
 		return false
 	}
-	if item.CoverURL != "" && !v.isManagedPlayableFile(item.CoverURL, "covers") {
-		return false
+	if item.CoverURL != "" {
+		if _, ok := v.normalizeManagedURL(item.CoverURL, "covers"); !ok {
+			return false
+		}
 	}
 	return true
 }
@@ -94,27 +102,10 @@ func (v MediaValidator) FilterPlayable(items []Video) []Video {
 	return filtered
 }
 
-func (v MediaValidator) isManagedPlayableFile(urlPath string, subDir string) bool {
-	normalizedPath, ok := v.normalizeManagedURL(urlPath, subDir)
-	if !ok {
-		return false
-	}
-
-	return v.hasManagedPlayableFile(normalizedPath, subDir)
-}
-
-func (v MediaValidator) hasManagedPlayableFile(urlPath string, subDir string) bool {
-	relativePrefix := "/static/" + subDir + "/"
-	filename := strings.TrimPrefix(urlPath, relativePrefix)
-	filePath := filepath.Join(v.uploadDir, subDir, filename)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-
-	ok, err := validateMediaContent(file, subDir)
-	return err == nil && ok
+// ObjectKey 把 /static/videos/1.mp4 这样的对外 URL 换算成媒体桶里的对象键 videos/1.mp4。
+// 只接受已经过 normalizeManagedURL 的路径。
+func ObjectKey(managedURL string) string {
+	return strings.TrimPrefix(managedURL, "/static/")
 }
 
 func (v MediaValidator) normalizeManagedURL(urlPath string, subDir string) (string, bool) {
@@ -136,8 +127,9 @@ func (v MediaValidator) normalizeManagedURL(urlPath string, subDir string) (stri
 		return "", false
 	}
 
+	// 文件名必须是单段：挡掉 ../ 逃逸和多层前缀，避免拼出桶内任意键。
 	filename := strings.TrimPrefix(normalizedPath, relativePrefix)
-	if filename == "" || filename != filepath.Base(filename) {
+	if filename == "" || filename != path.Base(filename) {
 		return "", false
 	}
 

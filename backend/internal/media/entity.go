@@ -8,11 +8,12 @@ const (
 	StatusFailed     = "failed"
 )
 
-// Task 记录一次视频源文件的异步转码任务。源文件路径只供 Worker 使用，不通过 API 返回。
+// Task 记录一次视频源文件的异步转码任务。
+// SourceKey 是源文件在上传桶里的对象键，只供 Worker 使用，不通过 API 返回。
 type Task struct {
 	ID           uint64    `gorm:"primaryKey" json:"id"`
 	AccountID    uint64    `gorm:"not null;index:idx_media_tasks_account_created" json:"-"`
-	SourcePath   string    `gorm:"size:512;not null" json:"-"`
+	SourceKey    string    `gorm:"column:source_path;size:512;not null" json:"-"`
 	PlayURL      string    `gorm:"size:255" json:"play_url,omitempty"`
 	PosterURL    string    `gorm:"size:255" json:"cover_url,omitempty"`
 	ContentType  string    `gorm:"size:64;not null;default:'video/mp4'" json:"content_type"`

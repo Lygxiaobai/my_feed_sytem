@@ -26,7 +26,7 @@ const (
 // 只在媒体已经可播时落库：上传中的分段没有 play_url，存进去只能得到一条打不开的草稿。
 // 同一作者 + 同一 play_url 复用一行，避免每次离开页面都堆一条重复草稿。
 func (s *Service) SaveDraft(accountID uint64, username string, req SaveDraftRequest) (*Video, error) {
-	playURL, coverURL, err := s.mediaValidator.NormalizePublishURLs(req.PlayURL, req.CoverURL)
+	playURL, coverURL, err := s.normalizePublishURLs(req.PlayURL, req.CoverURL)
 	if err != nil {
 		return nil, err
 	}

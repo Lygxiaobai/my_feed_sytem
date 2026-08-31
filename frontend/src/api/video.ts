@@ -2,8 +2,8 @@ import {
   AbortedError,
   ApiError,
   mapUploadSendPercent,
-  postFormWithProgress,
   postJson,
+  putBinaryWithProgress,
   resolveAssetUrl,
   type FormUploadProgress,
 } from './client'
@@ -187,15 +187,18 @@ export type VideoUploadTask = {
   updated_at: string
 }
 
-type UploadPartResponse = {
-  session_id: string
-  received: number
-  task?: VideoUploadTask
-}
-
-/** 与后端 media.UploadPartBytes 一致。单段必须能在 Cloudflare 约 100 秒回源窗口内走完。 */
-export const UPLOAD_PART_BYTES = 1024 * 1024
+/** 与后端 media.UploadPartBytes 一致。S3 对非末尾分片有 5MiB 硬下限，不能再往下调。 */
+export const UPLOAD_PART_BYTES = 8 * 1024 * 1024
 export const UPLOAD_PART_CONCURRENCY = 2
+
+type UploadInitResponse = {
+  upload_id: string
+  object_key: string
+  part_urls: string[]
+  part_bytes: number
+  part_count: number
+  part_concurrency: number
+}
 
 function userFacingMediaError(message?: string) {
   const text = message?.trim() || ''
@@ -221,25 +224,27 @@ export async function uploadVideo(
   return uploadVideoByParts(file, options)
 }
 
+/**
+ * 分片直传：向后端要一组预签名 URL，然后把字节直接推给对象存储。
+ * 视频内容全程不经过后端，后端只负责开场（签 URL）和收尾（拼装并登记转码任务）。
+ */
 async function uploadVideoByParts(
   file: File,
   options?: { onProgress?: (progress: FormUploadProgress) => void; signal?: AbortSignal },
 ) {
-  const init = await postJson<{
-    session_id: string
-    part_bytes: number
-    part_concurrency: number
-    part_count: number
-    part_origin?: string
-  }>('/video/uploadInit', { total: file.size }, { authRequired: true })
+  const init = await postJson<UploadInitResponse>(
+    '/video/uploadInit',
+    { total: file.size },
+    { authRequired: true },
+  )
   const partSize = init.part_bytes > 0 ? init.part_bytes : UPLOAD_PART_BYTES
-  const sessionId = init.session_id
   const count = init.part_count > 0 ? init.part_count : Math.ceil(file.size / partSize)
+  if (!init.upload_id || !init.object_key || count <= 0) throw new Error('上传未开始，请重试')
+  if (init.part_urls.length !== count) throw new Error('上传未开始，请重试')
   const concurrency = Math.max(
     1,
     Math.min(init.part_concurrency || UPLOAD_PART_CONCURRENCY, count),
   )
-  if (!sessionId || count <= 0) throw new Error('上传未开始，请重试')
 
   const loadedParts = new Array<number>(count).fill(0)
   const emit = () => {
@@ -253,19 +258,14 @@ async function uploadVideoByParts(
     })
   }
 
+  const etags = new Array<string>(count)
   const putPart = async (index: number) => {
     const offset = index * partSize
     const end = Math.min(offset + partSize, file.size)
-    const fd = new FormData()
-    fd.append('file', file.slice(offset, end), file.name)
-    return postFormWithProgress<UploadPartResponse>('/video/uploadPart', fd, {
-      authRequired: true,
-      baseUrl: init.part_origin ? `${init.part_origin.replace(/\/$/, '')}/api` : undefined,
-      headers: {
-        'X-Upload-Session': sessionId,
-        'X-Upload-Index': String(index),
-        'X-Upload-Count': String(count),
-      },
+    const url = init.part_urls[index]
+    if (!url) throw new Error('上传未开始，请重试')
+    // 分片号从 1 开始，与 S3 协议一致。
+    return putBinaryWithProgress(url, file.slice(offset, end), {
       signal: options?.signal,
       onProgress: (progress) => {
         if (progress.stage === 'done') return
@@ -280,24 +280,31 @@ async function uploadVideoByParts(
       return await putPart(index)
     } catch (error) {
       if (error instanceof AbortedError) throw error
-      // 超时或空 4xx 立刻重试会再开一套连接，把 Cloudflare 窗口挤得更死。
+      // 超时或空 4xx 立刻重试会再开一套连接，把上行带宽挤得更死。
       if (error instanceof ApiError) throw error
       return await putPart(index)
     }
   }
 
   let cursor = 0
-  let task: VideoUploadTask | undefined
   const workers = Array.from({ length: concurrency }, async () => {
     while (true) {
       const index = cursor
       cursor += 1
       if (index >= count) return
-      const res = await runPart(index)
-      if (res.task) task = res.task
+      etags[index] = await runPart(index)
     }
   })
   await Promise.all(workers)
+
+  const parts = etags.map((etag, index) => ({ part_number: index + 1, etag }))
+  if (parts.some((part) => !part.etag)) throw new Error('上传未完成，请重试')
+
+  const { task } = await postJson<{ task: VideoUploadTask }>(
+    '/video/uploadComplete',
+    { upload_id: init.upload_id, object_key: init.object_key, parts },
+    { authRequired: true },
+  )
   if (!task) throw new Error('上传未完成，请重试')
   return normalizeUploadTask(task)
 }

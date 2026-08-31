@@ -24,6 +24,7 @@ import (
 	"my_feed_system/internal/observability"
 	"my_feed_system/internal/popularity"
 	"my_feed_system/internal/recommend"
+	"my_feed_system/internal/storage"
 	"my_feed_system/internal/video"
 	workerpkg "my_feed_system/internal/worker"
 )
@@ -121,7 +122,21 @@ func main() {
 	popularityWorker := workerpkg.NewPopularityWorker(database, popularityService, detailCache)
 	timelineConsumer := workerpkg.NewTimelineConsumer(timelineStore, latestCache, publisher)
 	fanoutWorker := workerpkg.NewFanoutWorker(database, inboxStore, outboxStore, publisher, fanoutCfg)
-	mediaWorker := workerpkg.NewMediaWorker(database, cfg.Upload.Dir)
+	objectStore, err := storage.New(storage.Config{
+		Endpoint:       cfg.Storage.Endpoint,
+		PublicEndpoint: cfg.Storage.PublicEndpoint,
+		AccessKey:      cfg.Storage.AccessKey,
+		SecretKey:      cfg.Storage.SecretKey,
+		UseSSL:         cfg.Storage.UseSSL,
+		Region:         cfg.Storage.Region,
+		BucketUploads:  cfg.Storage.BucketUploads,
+		BucketMedia:    cfg.Storage.BucketMedia,
+	})
+	if err != nil {
+		fatal("connect object storage failed", err)
+	}
+
+	mediaWorker := workerpkg.NewMediaWorker(database, objectStore)
 	cfg.Embedding.ApplyDefaults()
 	embedWorker := workerpkg.NewEmbedWorker(database, recommend.NewHTTPEmbedder(cfg.Embedding))
 	var auditWorker *workerpkg.AuditWorker
