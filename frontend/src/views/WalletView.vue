@@ -197,6 +197,14 @@ onMounted(() => {
   void loadWallet()
 })
 
+function goBack() {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    void router.push('/account')
+  }
+}
+
 onUnmounted(() => {
   stopPoll()
 })
@@ -205,7 +213,10 @@ onUnmounted(() => {
 <template>
   <AppShell>
     <div class="card">
-      <p class="title" style="margin: 0">钱包</p>
+      <div class="page-head" style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px">
+        <button class="ghost compact back-btn mobile-only" type="button" @click="goBack">← 返回</button>
+        <p class="title" style="margin: 0">钱包</p>
+      </div>
       <div class="tools">
         <button class="ghost compact" type="button" @click="router.push('/invoice')">发票</button>
         <button class="ghost compact" type="button" @click="router.push('/checkin')">签到</button>

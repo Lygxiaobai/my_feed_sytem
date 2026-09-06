@@ -111,16 +111,18 @@ watch(
 <template>
   <AppShell>
     <div class="card">
-      <div class="row" style="justify-content: space-between; align-items: baseline">
+      <div class="hot-header">
         <div>
-          <p class="title" style="margin: 0">&#x70ED;&#x699C;</p>
+          <p class="title" style="margin: 0">热榜</p>
         </div>
 
-        <div class="row">
-          <label class="subtle" style="margin: 0">limit</label>
-          <input v-model.number="state.limit" type="number" min="1" max="50" style="width: 90px" :disabled="state.loading" />
-          <button class="primary" type="button" :disabled="state.loading" @click="loadHot(true)">&#x5237;&#x65B0;</button>
-          <button type="button" :disabled="state.loading || !state.hasMore" @click="loadHot(false)">&#x52A0;&#x8F7D;&#x66F4;&#x591A;</button>
+        <div class="hot-controls">
+          <div class="hot-limit-group">
+            <label class="subtle" style="margin: 0">limit</label>
+            <input v-model.number="state.limit" type="number" min="1" max="50" class="hot-limit-input" :disabled="state.loading" />
+          </div>
+          <button class="primary" type="button" :disabled="state.loading" @click="loadHot(true)">刷新</button>
+          <button type="button" :disabled="state.loading || !state.hasMore" @click="loadHot(false)">加载更多</button>
         </div>
       </div>
 
@@ -156,6 +158,31 @@ watch(
 </template>
 
 <style scoped>
+.hot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hot-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.hot-limit-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hot-limit-input {
+  width: 68px;
+}
+
 .rank-list {
   display: grid;
   gap: 12px;
@@ -197,6 +224,24 @@ watch(
 }
 
 @media (max-width: 900px) {
+  .hot-header {
+    gap: 8px;
+  }
+  .hot-controls {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .hot-controls button {
+    flex: 1;
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 13px;
+  }
+  .hot-limit-input {
+    width: 54px;
+    padding: 6px 8px;
+    font-size: 13px;
+  }
   .rank-row {
     grid-template-columns: 38px minmax(0, 1fr);
     gap: 10px;

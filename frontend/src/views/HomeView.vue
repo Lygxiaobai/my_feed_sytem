@@ -757,6 +757,11 @@ onBeforeUnmount(() => {
 <template>
   <AppShell full>
     <div class="page">
+      <nav class="mobile-feed-tabs mobile-only" aria-label="移动端Feed切换">
+        <RouterLink class="m-feed-tab" :class="{ on: tab === 'following' }" to="/following">关注</RouterLink>
+        <RouterLink class="m-feed-tab" :class="{ on: tab === 'recommend' }" to="/">推荐</RouterLink>
+        <RouterLink class="m-feed-tab" :class="{ on: tab === 'hot' }" to="/likes">点赞榜</RouterLink>
+      </nav>
       <div ref="scroller" class="scroller" @scroll="onScroll">
         <section v-if="currentState.loading && currentState.items.length === 0" class="slide">
           <FeedStageSkeleton />
@@ -867,7 +872,7 @@ onBeforeUnmount(() => {
               </button>
               <button
                 v-if="auth.isLoggedIn"
-                class="act"
+                class="act desktop-only"
                 type="button"
                 @click.stop="openInboxTip(item)"
               >
@@ -879,7 +884,7 @@ onBeforeUnmount(() => {
 
               <button
                 v-if="!auth.isLoggedIn || myAccountId !== item.author.id"
-                class="act"
+                class="act desktop-only"
                 type="button"
                 @click.stop="openReport(item)"
               >
@@ -970,15 +975,19 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .page {
+  flex: 1 1 0%;
   height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   padding: 12px 20px 20px;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .scroller {
-  flex: 1;
+  flex: 1 1 0%;
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   scroll-snap-type: y mandatory;
@@ -987,6 +996,8 @@ onBeforeUnmount(() => {
   -ms-overflow-style: none;
   border-radius: 16px;
   background: #000;
+  display: flex;
+  flex-direction: column;
 }
 
 .scroller::-webkit-scrollbar {
@@ -1326,10 +1337,67 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .page {
     padding: 0;
+    position: relative;
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 0%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .mobile-feed-tabs {
+    position: absolute;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 25;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 4px 14px;
+    background: rgba(0, 0, 0, 0.35);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    pointer-events: auto;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .m-feed-tab {
+    color: rgba(255, 255, 255, 0.68);
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    padding: 4px 6px;
+    position: relative;
+    transition: color 150ms ease;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .m-feed-tab.on {
+    color: #ffffff;
+    font-weight: 800;
+  }
+
+  .m-feed-tab.on::after {
+    content: '';
+    position: absolute;
+    left: 15%;
+    right: 15%;
+    bottom: 0px;
+    height: 2px;
+    border-radius: 2px;
+    background: #fe2c55;
   }
 
   .scroller {
     border-radius: 0;
+    height: 100%;
+    min-height: 0;
   }
 
   .chip {
@@ -1339,23 +1407,37 @@ onBeforeUnmount(() => {
 
   .meta {
     left: 12px;
-    right: 84px;
+    right: 70px;
     bottom: calc(14px + env(safe-area-inset-bottom, 0px));
     max-width: none;
   }
 
   .stage.has-composer .meta {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   }
 
   .actions {
-    right: 6px;
-    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-    gap: 12px;
+    right: 8px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    gap: 10px;
   }
 
   .stage.has-composer .actions {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .act {
+    width: 44px;
+    gap: 2px;
+  }
+
+  .icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .count {
+    font-size: 11px;
   }
 
   .drawer-backdrop {

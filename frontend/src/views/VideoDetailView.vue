@@ -678,14 +678,14 @@ onBeforeUnmount(() => {
               </span>
               <span class="count">打赏</span>
             </button>
-            <button v-if="auth.isLoggedIn" class="act" type="button" @click.stop="openTips">
+            <button v-if="auth.isLoggedIn" class="act desktop-only" type="button" @click.stop="openTips">
               <span class="icon">
                 <AppIcon name="list" :size="24" />
               </span>
               <span class="count">打赏记录</span>
             </button>
 
-            <button v-if="!isOwnVideo" class="act" type="button" @click.stop="openReport">
+            <button v-if="!isOwnVideo" class="act desktop-only" type="button" @click.stop="openReport">
               <span class="icon">
                 <AppIcon name="flag" :size="24" />
               </span>
@@ -1136,37 +1136,68 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .page {
     padding: 0;
+    position: relative;
   }
 
   .top {
-    height: 48px;
-    padding: 0 10px;
-    gap: 8px;
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 25;
+    height: auto;
+    padding: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .top .chip {
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 6px 12px;
+    font-size: 13px;
   }
 
   .wrap {
     border-radius: 0;
+    height: 100%;
   }
 
   .meta {
     left: 12px;
-    right: 84px;
+    right: 70px;
     bottom: calc(14px + env(safe-area-inset-bottom, 0px));
     max-width: none;
   }
 
   .stage.has-composer .meta {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
   }
 
   .actions {
-    right: 6px;
-    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
-    gap: 12px;
+    right: 8px;
+    bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+    gap: 10px;
   }
 
   .stage.has-composer .actions {
-    bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .act {
+    width: 44px;
+    gap: 2px;
+  }
+
+  .icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .count {
+    font-size: 11px;
   }
 
   .drawer-backdrop {

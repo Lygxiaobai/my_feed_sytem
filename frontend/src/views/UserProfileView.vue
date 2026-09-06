@@ -662,6 +662,25 @@ onMounted(loadProfile)
 @media (max-width: 800px) {
   .video-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+}
+
+@media (max-width: 900px) {
+  .drawer-backdrop {
+    padding: 0;
+    align-items: end;
+    padding-bottom: var(--bottom-nav-h, 56px);
+  }
+
+  .drawer {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: min(75dvh, 600px);
+    border-radius: 18px 18px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
   }
 }
 

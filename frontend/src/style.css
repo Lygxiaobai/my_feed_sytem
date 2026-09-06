@@ -315,18 +315,13 @@ button:disabled {
 }
 
 /* Utility helpers used by layouts */
-.mobile-only {
-  display: none !important;
-}
-
-.desktop-only {
-  display: initial;
+@media (min-width: 901px) {
+  .mobile-only {
+    display: none !important;
+  }
 }
 
 @media (max-width: 900px) {
-  .mobile-only {
-    display: initial !important;
-  }
   .desktop-only {
     display: none !important;
   }

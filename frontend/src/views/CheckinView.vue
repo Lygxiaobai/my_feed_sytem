@@ -96,6 +96,14 @@ onMounted(async () => {
   await loadMonth()
 })
 
+function goBack() {
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    void router.push('/account')
+  }
+}
+
 async function onCheckin() {
   if (busy.value || claimedToday.value) return
   busy.value = true
@@ -124,7 +132,9 @@ async function onCheckin() {
   <AppShell>
     <div class="card">
       <div class="page-head">
+        <button class="ghost compact back-btn mobile-only" type="button" @click="goBack">← 返回</button>
         <p class="title" style="margin: 0">每日签到</p>
+        <div style="flex: 1"></div>
         <button class="ghost compact" type="button" @click="router.push('/wallet')">钱包</button>
       </div>
       <p class="subtle" style="margin-top: 10px">

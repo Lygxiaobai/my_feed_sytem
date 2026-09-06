@@ -63,13 +63,14 @@ const theme = useThemeStore()
 const router = useRouter()
 const route = useRoute()
 
+const isHomeTabActive = computed(() => route.path === '/' || route.path === '/following' || route.path === '/likes')
+
 const search = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const searchOpen = ref(false)
 const notifyOpen = ref(false)
 const themeOpen = ref(false)
 const notifyWrap = ref<HTMLElement | null>(null)
 const messageWrap = ref<HTMLElement | null>(null)
-const themeWrap = ref<HTMLElement | null>(null)
 const asideThemeWrap = ref<HTMLElement | null>(null)
 const themeButtonLabel = computed(() => {
   if (theme.preference === 'system') return '外观：跟随系统'
@@ -84,10 +85,6 @@ function bindNotifyWrap(el: unknown) {
 
 function bindMessageWrap(el: unknown) {
   messageWrap.value = el instanceof HTMLElement ? el : null
-}
-
-function bindThemeWrap(el: unknown) {
-  themeWrap.value = el instanceof HTMLElement ? el : null
 }
 
 function bindAsideThemeWrap(el: unknown) {
@@ -138,9 +135,8 @@ function onDocumentPointerDown(event: PointerEvent) {
   if (!(target instanceof Node)) return
   if (notifyWrap.value && !notifyWrap.value.contains(target)) notifyOpen.value = false
   if (messageWrap.value && !messageWrap.value.contains(target)) dm.closePanel()
-  const inFab = themeWrap.value?.contains(target)
   const inAside = asideThemeWrap.value?.contains(target)
-  if (!inFab && !inAside) themeOpen.value = false
+  if (!inAside) themeOpen.value = false
 }
 
 watch(
@@ -425,6 +421,7 @@ function headerActionTo(action: HeaderAction) {
           @keydown.enter="onSearch"
         />
         <button class="dy-search-go" type="button" @click="onSearch">搜索</button>
+        <button class="dy-search-cancel" type="button" @click="searchOpen = false">取消</button>
       </div>
 
       <div class="dy-content" :class="props.full ? 'full' : 'padded'">
@@ -440,7 +437,7 @@ function headerActionTo(action: HeaderAction) {
     </div>
 
     <nav class="dy-bottom-nav mobile-only" aria-label="底部导航">
-      <RouterLink class="dy-tab" :class="{ on: route.path === '/' }" to="/">
+      <RouterLink class="dy-tab" :class="{ on: isHomeTabActive }" to="/">
         <AppIcon name="home" :size="20" />
         <span>首页</span>
       </RouterLink>
@@ -458,21 +455,7 @@ function headerActionTo(action: HeaderAction) {
       </RouterLink>
     </nav>
 
-    <div class="dy-theme-fab mobile-only" :ref="bindThemeWrap">
-      <button
-        class="dy-theme-btn"
-        type="button"
-        :aria-label="themeButtonLabel"
-        :aria-expanded="themeOpen"
-        aria-haspopup="true"
-        @click="toggleThemeMenu"
-      >
-        <AppIcon :name="theme.resolved === 'dark' ? 'moon' : 'sun'" :size="20" />
-      </button>
-      <div v-if="themeOpen" class="dy-theme-drop">
-        <ThemePicker compact @picked="themeOpen = false" />
-      </div>
-    </div>
+
 
     <Toaster />
   </div>
@@ -852,27 +835,55 @@ function headerActionTo(action: HeaderAction) {
   background: transparent;
   color: var(--text);
   cursor: pointer;
-  display: inline-grid;
-  place-items: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
-}
-
-.dy-mobile-search {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--chrome);
   flex-shrink: 0;
 }
 
+.dy-mobile-search {
+  display: flex;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h, 52px);
+  z-index: 95;
+  gap: 8px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--chrome);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-sizing: border-box;
+}
+
 .dy-mobile-search .dy-search-input {
-  height: 40px;
+  flex: 1;
+  min-width: 0;
+  height: 36px;
   border: 0;
   border-radius: 999px;
   background: var(--fill);
+  color: var(--text);
   padding: 0 14px;
+  font-size: 14px;
+  outline: none;
+}
+
+.dy-search-cancel {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.dy-search-cancel:hover {
+  color: var(--text);
 }
 
 .dy-main {
@@ -880,15 +891,20 @@ function headerActionTo(action: HeaderAction) {
   grid-row: 2;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   display: flex;
   flex-direction: column;
   background: var(--bg);
+  overflow: hidden;
 }
 
 .dy-content {
-  flex: 1;
+  flex: 1 1 0%;
   min-height: 0;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
 
 .dy-content.padded {
@@ -897,7 +913,10 @@ function headerActionTo(action: HeaderAction) {
 }
 
 .dy-content.full {
+  height: 100%;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 .dy-bottom-nav {
@@ -991,17 +1010,71 @@ function headerActionTo(action: HeaderAction) {
     display: none !important;
   }
 
-  .mobile-only {
-    display: initial !important;
-  }
+
 
   .dy-topbar {
-    grid-template-columns: auto 1fr auto;
-    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: var(--topbar-h, 52px);
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+
+  .dy-brand {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
 
   .dy-brand-text {
     font-size: 16px;
+  }
+
+  .dy-top-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+    height: 100%;
+    flex-shrink: 0;
+  }
+
+  .dy-icon-btn,
+  .dy-icon-btn.mobile-only,
+  button.dy-icon-btn,
+  a.dy-icon-btn {
+    width: 36px;
+    height: 36px;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border-radius: 50%;
+    padding: 0;
+    flex-shrink: 0;
+    position: relative;
+    box-sizing: border-box;
+    vertical-align: middle;
+  }
+
+  .dy-icon-btn :deep(.app-icon),
+  .dy-icon-btn .app-icon {
+    display: block;
+    margin: 0 auto;
+  }
+
+  .dy-head-avatar {
+    margin-left: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .dy-mobile-notify .dy-badge {
+    top: 2px;
+    right: 2px;
   }
 
   .dy-bottom-nav.mobile-only {
@@ -1009,16 +1082,15 @@ function headerActionTo(action: HeaderAction) {
   }
 
   .dy-mobile-search.mobile-only {
-    display: grid !important;
-  }
-
-  .dy-theme-fab.mobile-only {
-    display: block !important;
+    display: flex !important;
   }
 
   .dy-main {
     grid-column: 1;
     padding-bottom: var(--bottom-nav-h, 56px);
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
   }
 }
 </style>
